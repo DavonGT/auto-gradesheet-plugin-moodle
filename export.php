@@ -41,6 +41,20 @@ function get_remarks_essu($grade) {
 $course     = $DB->get_record('course', ['id' => $courseid], '*', MUST_EXIST);
 $coursename = format_string($course->fullname);
 $config     = $DB->get_record('local_gradesheet_config', ['courseid' => $courseid]);
+
+// Load course details from config
+$semester      = ($config && !empty($config->semester))       ? $config->semester       : 'Second Semester';
+$schoolyear    = ($config && !empty($config->schoolyear))     ? $config->schoolyear     : '2025-2026';
+$coursenumber  = ($config && !empty($config->coursenumber))   ? $config->coursenumber   : $coursename;
+$descriptive   = ($config && !empty($config->descriptive))    ? $config->descriptive    : $coursename;
+$courseandyear = ($config && !empty($config->courseandyear))  ? $config->courseandyear  : '';
+$schedule      = ($config && !empty($config->schedule))       ? $config->schedule       : '';
+$units         = ($config && !empty($config->units))          ? $config->units          : '3';
+$instructor    = ($config && !empty($config->instructor))     ? $config->instructor     : '';
+$depthead      = ($config && !empty($config->department_head))? $config->department_head: '';
+$registrar     = ($config && !empty($config->registrar))      ? $config->registrar      : '';
+$collegedean   = ($config && !empty($config->college_dean))   ? $config->college_dean   : '';
+
 $midweight  = $config ? floatval($config->quizweight)     / 100 : 0.50;
 $finweight  = $config ? floatval($config->examweight)     / 100 : 0.50;
 $mpct       = $config ? $config->quizweight     : 50;
@@ -151,7 +165,7 @@ $pdf->SetFont('helvetica', 'B', 16);
 $pdf->Cell(0, 8, 'REPORT OF GRADES', 0, 1, 'C');
 
 $pdf->SetFont('helvetica', '', 10);
-$pdf->Cell(0, 6, 'Second Semester  SY 2024-2025', 0, 1, 'C');
+$pdf->Cell(0, 6, $semester . '  SY ' . $schoolyear, 0, 1, 'C');
 
 $pdf->Ln(5);
 
@@ -163,26 +177,26 @@ $pdf->SetFont('helvetica', '', 9);
 $pdf->SetX(15);
 $pdf->Cell(35, 5, 'Subject and Course No. :', 0, 0);
 $pdf->SetFont('helvetica', 'B', 9);
-$pdf->Cell(0, 5, $coursename, 0, 1);
+$pdf->Cell(0, 5, $coursenumber, 0, 1);
 
 $pdf->SetFont('helvetica', '', 9);
 $pdf->SetX(15);
 $pdf->Cell(35, 5, 'Descriptive Title :', 0, 0);
 $pdf->SetFont('helvetica', 'B', 9);
-$pdf->Cell(0, 5, $coursename, 0, 1);
+$pdf->Cell(0, 5, $descriptive, 0, 1);
 
 $pdf->SetFont('helvetica', '', 9);
 $pdf->SetX(15);
 $pdf->Cell(35, 5, 'Course and Year :', 0, 0);
-$pdf->Cell(0, 5, '', 0, 1);
+$pdf->Cell(0, 5, $courseandyear, 0, 1);
 
 $pdf->SetX(15);
 $pdf->Cell(35, 5, 'Schedule of Classes :', 0, 0);
-$pdf->Cell(0, 5, '', 0, 1);
+$pdf->Cell(0, 5, $schedule, 0, 1);
 
 $pdf->SetX(15);
 $pdf->Cell(35, 5, 'Number of Units :', 0, 0);
-$pdf->Cell(0, 5, '3', 0, 1);
+$pdf->Cell(0, 5, $units, 0, 1);
 
 // Right block — Rating legend
 $legendX = 120;
@@ -275,27 +289,31 @@ $pdf->SetFont('helvetica', 'I', 9);
 $pdf->Cell(90, 5, 'Certified True & Correct:', 0, 0);
 $pdf->Cell(0,  5, 'Checked:', 0, 1);
 
-$pdf->SetFont('helvetica', 'B', 10);
-$pdf->Cell(90, 5, '_______________________________', 0, 0);
-$pdf->Cell(0,  5, '_______________________________', 0, 1);
+$pdf->Ln(12);
 
 $pdf->SetFont('helvetica', 'B', 9);
-$pdf->Cell(90, 4, 'Instructor', 0, 0, 'C');
-$pdf->Cell(0,  4, 'Department Head', 0, 1);
+$pdf->Cell(90, 5, $instructor, 0, 0, 'C');
+$pdf->Cell(0,  5, $depthead, 0, 1, 'C');
 
-$pdf->Ln(6);
+$pdf->SetFont('helvetica', 'I', 8);
+$pdf->Cell(90, 4, 'Instructor', 0, 0, 'C');
+$pdf->Cell(0,  4, 'Department Head', 0, 1, 'C');
+
+$pdf->Ln(8);
 
 $pdf->SetFont('helvetica', 'I', 9);
 $pdf->Cell(90, 5, 'Received:', 0, 0);
 $pdf->Cell(0,  5, 'Approved:', 0, 1);
 
-$pdf->SetFont('helvetica', 'B', 10);
-$pdf->Cell(90, 5, '_______________________________', 0, 0);
-$pdf->Cell(0,  5, '_______________________________', 0, 1);
+$pdf->Ln(12);
 
 $pdf->SetFont('helvetica', 'B', 9);
+$pdf->Cell(90, 5, $registrar, 0, 0, 'C');
+$pdf->Cell(0,  5, $collegedean, 0, 1, 'C');
+
+$pdf->SetFont('helvetica', 'I', 8);
 $pdf->Cell(90, 4, 'Registrar', 0, 0, 'C');
-$pdf->Cell(0,  4, 'College Dean', 0, 1);
+$pdf->Cell(0,  4, 'College Dean', 0, 1, 'C');
 
 // ── BOTTOM FOOTER ─────────────────────────────────────────────────────────────
 $pdf->SetY(-18);

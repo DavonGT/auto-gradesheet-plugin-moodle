@@ -28,6 +28,20 @@ function get_remarks_essu($grade) {
 $course     = $DB->get_record('course', ['id' => $courseid], '*', MUST_EXIST);
 $coursename = format_string($course->fullname);
 $config     = $DB->get_record('local_gradesheet_config', ['courseid' => $courseid]);
+
+// Load course details from config
+$semester      = ($config && !empty($config->semester))       ? $config->semester       : 'Second Semester';
+$schoolyear    = ($config && !empty($config->schoolyear))     ? $config->schoolyear     : '2025-2026';
+$coursenumber  = ($config && !empty($config->coursenumber))   ? $config->coursenumber   : $coursename;
+$descriptive   = ($config && !empty($config->descriptive))    ? $config->descriptive    : $coursename;
+$courseandyear = ($config && !empty($config->courseandyear))  ? $config->courseandyear  : '';
+$schedule      = ($config && !empty($config->schedule))       ? $config->schedule       : '';
+$units         = ($config && !empty($config->units))          ? $config->units          : '3';
+$instructor    = ($config && !empty($config->instructor))     ? $config->instructor     : '';
+$depthead      = ($config && !empty($config->department_head))? $config->department_head: '';
+$registrar     = ($config && !empty($config->registrar))      ? $config->registrar      : '';
+$collegedean   = ($config && !empty($config->college_dean))   ? $config->college_dean   : '';
+
 $midweight  = $config ? floatval($config->quizweight)  / 100 : 0.50;
 $finweight  = $config ? floatval($config->examweight)  / 100 : 0.50;
 $mpct       = $config ? $config->quizweight  : 50;
@@ -250,13 +264,12 @@ echo $OUTPUT->header();
 }
 .gs-sig-label {
     font-style: italic;
-    margin-bottom: 18px;
+    margin-bottom: 4px;
 }
 .gs-sig-name {
     font-weight: bold;
-    border-top: 1px solid #333;
-    padding-top: 3px;
     text-align: center;
+    margin-top: 20px;
 }
 .gs-sig-title {
     text-align: center;
@@ -334,20 +347,11 @@ echo $OUTPUT->header();
                 </tr>
                 <tr>
                     <td>Descriptive Title :</td>
-                    <td><strong><?php echo $coursename; ?></strong></td>
+                    <td><strong><?php echo $descriptive; ?></strong></td>
                 </tr>
-                <tr>
-                    <td>Course and Year :</td>
-                    <td></td>
-                </tr>
-                <tr>
-                    <td>Schedule of Classes :</td>
-                    <td></td>
-                </tr>
-                <tr>
-                    <td>Number of Units :</td>
-                    <td>3</td>
-                </tr>
+                <tr><td>Course and Year :</td><td><strong><?php echo $courseandyear; ?></strong></td></tr>
+				<tr><td>Schedule of Classes :</td><td><strong><?php echo $schedule; ?></strong></td></tr>
+				<tr><td>Number of Units :</td><td><strong><?php echo $units; ?></strong></td></tr>
             </table>
         </div>
 
@@ -415,24 +419,24 @@ echo $OUTPUT->header();
         <div class="gs-sig-row">
             <div class="gs-sig-block">
                 <div class="gs-sig-label">Certified True &amp; Correct:</div>
-                <div class="gs-sig-name">________________________________</div>
-                <div class="gs-sig-title">Instructor</div>
+                <div class="gs-sig-name"><?php echo $instructor; ?></div>
+				<div class="gs-sig-title">Instructor</div>
             </div>
             <div class="gs-sig-block">
                 <div class="gs-sig-label">Checked:</div>
-                <div class="gs-sig-name">________________________________</div>
+                <div class="gs-sig-name"><?php echo $depthead; ?></div>
                 <div class="gs-sig-title">Department Head</div>
             </div>
         </div>
         <div class="gs-sig-row">
             <div class="gs-sig-block">
                 <div class="gs-sig-label">Received:</div>
-                <div class="gs-sig-name">________________________________</div>
+                <div class="gs-sig-name"><?php echo $registrar; ?></div>
                 <div class="gs-sig-title">Registrar</div>
             </div>
             <div class="gs-sig-block">
                 <div class="gs-sig-label">Approved:</div>
-                <div class="gs-sig-name">________________________________</div>
+                <div class="gs-sig-name"><?php echo $collegedean; ?></div>
                 <div class="gs-sig-title">College Dean</div>
             </div>
         </div>
