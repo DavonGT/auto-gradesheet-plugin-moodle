@@ -9,44 +9,35 @@ $courseid = required_param('courseid', PARAM_INT);
 $context  = context_course::instance($courseid);
 require_capability('local/gradesheet:manage', $context);
 
-function get_equivalent($grade) {
-    if ($grade == 100)  return '1.0';
-    if ($grade >= 94)   return number_format(1.1 + (99 - $grade) * 0.1, 1);
-    if ($grade >= 89)   return number_format(1.6 + (93 - $grade) * 0.1, 1);
-    if ($grade >= 84)   return number_format(2.1 + (88 - $grade) * 0.1, 1);
-    if ($grade >= 79)   return number_format(2.6 + (83 - $grade) * 0.1, 1);
-    if ($grade >= 75)   return number_format(3.1 + (78 - $grade) * 0.1, 1);
-    if ($grade >= 69)   return number_format(3.6 + (74 - $grade) * 0.1, 1);
-    return '5.0';
-}
-
-function get_remarks_essu($grade) {
+function get_remarks_prev($grade) {
     return ($grade >= 75) ? 'Passed' : 'Failed';
 }
 
-// Load data
-$course     = $DB->get_record('course', ['id' => $courseid], '*', MUST_EXIST);
-$coursename = format_string($course->fullname);
-$config     = $DB->get_record('local_gradesheet_config', ['courseid' => $courseid]);
+// Load course and config
+$course        = $DB->get_record('course', ['id' => $courseid], '*', MUST_EXIST);
+$coursename    = format_string($course->fullname);
+$config        = $DB->get_record('local_gradesheet_config', ['courseid' => $courseid]);
 
-// Load course details from config
-$semester      = ($config && !empty($config->semester))       ? $config->semester       : 'Second Semester';
-$schoolyear    = ($config && !empty($config->schoolyear))     ? $config->schoolyear     : '2025-2026';
-$coursenumber  = ($config && !empty($config->coursenumber))   ? $config->coursenumber   : $coursename;
-$descriptive   = ($config && !empty($config->descriptive))    ? $config->descriptive    : $coursename;
-$courseandyear = ($config && !empty($config->courseandyear))  ? $config->courseandyear  : '';
-$schedule      = ($config && !empty($config->schedule))       ? $config->schedule       : '';
-$units         = ($config && !empty($config->units))          ? $config->units          : '3';
-$instructor    = ($config && !empty($config->instructor))     ? $config->instructor     : '';
-$depthead      = ($config && !empty($config->department_head))? $config->department_head: '';
-$registrar     = ($config && !empty($config->registrar))      ? $config->registrar      : '';
-$collegedean   = ($config && !empty($config->college_dean))   ? $config->college_dean   : '';
+$semester      = ($config && !empty($config->semester))        ? $config->semester        : 'Second Semester';
+$schoolyear    = ($config && !empty($config->schoolyear))      ? $config->schoolyear      : '2025-2026';
+$coursenumber  = ($config && !empty($config->coursenumber))    ? $config->coursenumber    : $coursename;
+$descriptive   = ($config && !empty($config->descriptive))     ? $config->descriptive     : $coursename;
+$courseandyear = ($config && !empty($config->courseandyear))   ? $config->courseandyear   : '';
+$schedule      = ($config && !empty($config->schedule))        ? $config->schedule        : '';
+$units         = ($config && !empty($config->units))           ? $config->units           : '3';
+$instructor    = ($config && !empty($config->instructor))      ? $config->instructor      : '';
+$depthead      = ($config && !empty($config->department_head)) ? $config->department_head : '';
+$registrar     = ($config && !empty($config->registrar))       ? $config->registrar       : '';
+$collegedean   = ($config && !empty($config->college_dean))    ? $config->college_dean    : '';
 
-$midweight  = $config ? floatval($config->quizweight)  / 100 : 0.50;
-$finweight  = $config ? floatval($config->examweight)  / 100 : 0.50;
-$mpct       = $config ? $config->quizweight  : 50;
-$fpct       = $config ? $config->examweight  : 50;
+$midweight = $config ? floatval($config->quizweight) / 100 : 0.50;
+$finweight = $config ? floatval($config->examweight) / 100 : 0.50;
 
+// Load categories
+$categories    = $DB->get_records('local_gradesheet_categories', ['courseid' => $courseid], 'sortorder ASC');
+$hascategories = !empty($categories);
+
+// Get students and grade items
 $students = get_enrolled_users($context, '', 0, 'u.*', 'u.lastname ASC, u.firstname ASC');
 $gitems   = $DB->get_records_select(
     'grade_items',
@@ -69,6 +60,11 @@ foreach ($students as $student) {
     }
     if ($isteacher) continue;
 
+    $cattotals = [];
+    foreach ($categories as $cat) {
+        $cattotals[$cat->id] = ['total' => 0, 'count' => 0, 'weight' => $cat->weight, 'name' => $cat->name];
+    }
+
     $midTotal = 0; $midCount = 0;
     $finTotal = 0; $finCount = 0;
 
@@ -78,40 +74,50 @@ foreach ($students as $student) {
         $max    = floatval($gitem->grademax);
         if ($max > 0 && $max != 100) $val = ($val / $max) * 100;
 
-        $map = $DB->get_record('local_gradesheet_itemmap', [
-            'courseid'    => $courseid,
-            'gradeitemid' => $gitem->id,
-        ]);
-        $period = $map ? $map->period : 'finals';
-        if ($period === 'midterm') {
-            $midTotal += $val; $midCount++;
-        } else {
-            $finTotal += $val; $finCount++;
+        $map    = $DB->get_record('local_gradesheet_itemmap', ['courseid' => $courseid, 'gradeitemid' => $gitem->id]);
+        $period = $map ? $map->period     : 'finals';
+        $catid  = $map ? $map->categoryid : 0;
+
+        if ($catid && isset($cattotals[$catid])) {
+            $cattotals[$catid]['total'] += $val;
+            $cattotals[$catid]['count']++;
+        }
+
+        if ($period === 'midterm') { $midTotal += $val; $midCount++; }
+        else                       { $finTotal += $val; $finCount++; }
+    }
+
+    $weightedFinal = 0;
+    $totalWeight   = 0;
+    foreach ($cattotals as $data) {
+        if ($data['count'] > 0) {
+            $weightedFinal += ($data['total'] / $data['count']) * ($data['weight'] / 100);
+            $totalWeight   += $data['weight'];
         }
     }
 
-    $midAvg  = $midCount > 0 ? $midTotal / $midCount : 0;
-    $finAvg  = $finCount > 0 ? $finTotal / $finCount : 0;
-    $average = ($midAvg * $midweight) + ($finAvg * $finweight);
-    $equiv   = get_equivalent($average);
-    $remarks = get_remarks_essu($average);
+    $midAvg = $midCount > 0 ? $midTotal / $midCount : 0;
+    $finAvg = $finCount > 0 ? $finTotal / $finCount : 0;
+    if ($totalWeight == 0) {
+        $weightedFinal = ($midAvg * $midweight) + ($finAvg * $finweight);
+    }
 
+    $remarks = get_remarks_prev($weightedFinal);
     if ($remarks === 'Passed') $passcount++; else $failcount++;
 
     $rows[] = [
-        'idnumber' => $student->idnumber,
-        'name'     => $student->lastname . ', ' . $student->firstname,
-        'midterm'  => number_format($midAvg,  2),
-        'finals'   => number_format($finAvg,  2),
-        'average'  => number_format($average, 2),
-        'equiv'    => $equiv,
-        'remarks'  => $remarks,
+        'idnumber'  => $student->idnumber,
+        'name'      => $student->lastname . ', ' . $student->firstname,
+        'midterm'   => number_format($midAvg, 2),
+        'finals'    => number_format($finAvg, 2),
+        'average'   => number_format($weightedFinal, 2),
+        'remarks'   => $remarks,
+        'cattotals' => $cattotals,
     ];
 }
 
 $total    = $passcount + $failcount;
 $passrate = $total > 0 ? round(($passcount / $total) * 100, 1) : 0;
-$failrate = 100 - $passrate;
 
 $PAGE->set_url('/local/gradesheet/preview.php', ['courseid' => $courseid]);
 $PAGE->set_context($context);
@@ -122,7 +128,6 @@ echo $OUTPUT->header();
 ?>
 
 <style>
-/* ── SCREEN TOOLBAR ───────────────────────────── */
 .preview-toolbar {
     background: #f8f9fa;
     border: 1px solid #dee2e6;
@@ -133,179 +138,51 @@ echo $OUTPUT->header();
     justify-content: space-between;
     align-items: center;
 }
-
-/* ── GRADE SHEET PAPER ────────────────────────── */
 .gradesheet-wrapper {
     background: white;
     border: 1px solid #ccc;
     box-shadow: 0 4px 15px rgba(0,0,0,0.15);
     padding: 30px 35px;
-    max-width: 820px;
+    max-width: 860px;
     margin: 0 auto 40px auto;
     font-family: Arial, sans-serif;
     font-size: 10px;
 }
-
-/* Header */
-.gs-top {
-    display: flex;
-    align-items: center;
-    margin-bottom: 6px;
-}
-.gs-logo-box {
-    width: 60px; height: 60px;
-    border: 1px solid #ccc;
-    display: flex; align-items: center;
-    justify-content: center;
-    font-size: 8px; color: #999;
-    flex-shrink: 0;
-}
-.gs-title-center {
-    flex: 1;
-    text-align: center;
-    padding: 0 10px;
-}
-.gs-title-center h2 {
-    font-size: 15px;
-    font-weight: bold;
-    margin: 0 0 2px 0;
-}
-.gs-title-center p {
-    font-size: 9px;
-    margin: 0;
-    color: #555;
-}
-.gs-main-title {
-    text-align: center;
-    font-size: 16px;
-    font-weight: bold;
-    margin: 10px 0 2px 0;
-    letter-spacing: 1px;
-}
-.gs-subtitle {
-    text-align: center;
-    font-size: 10px;
-    margin: 0 0 10px 0;
-}
-
-/* Info + Legend row */
-.gs-info-legend {
-    display: flex;
-    gap: 10px;
-    margin-bottom: 12px;
-}
-.gs-info {
-    flex: 1;
-    font-size: 9.5px;
-}
-.gs-info table td {
-    padding: 1px 4px;
-    vertical-align: top;
-}
-.gs-info table td:first-child {
-    font-style: italic;
-    white-space: nowrap;
-    color: #333;
-}
-.gs-legend {
-    font-size: 8px;
-}
-.gs-legend table {
-    border-collapse: collapse;
-}
-.gs-legend table th, .gs-legend table td {
-    border: 1px solid #999;
-    padding: 1px 4px;
-    text-align: center;
-}
-.gs-legend table th {
-    font-weight: bold;
-    background: #f0f0f0;
-}
-
-/* Main grade table */
-.gs-table {
-    width: 100%;
-    border-collapse: collapse;
-    font-size: 9.5px;
-    margin-bottom: 16px;
-}
-.gs-table th {
-    border: 1px solid #333;
-    padding: 5px 3px;
-    text-align: center;
-    font-weight: bold;
-    background: white;
-}
-.gs-table td {
-    border: 1px solid #555;
-    padding: 4px 3px;
-    text-align: center;
-}
-.gs-table td.name-col {
-    text-align: left;
-    padding-left: 6px;
-}
+.gs-info-legend { display: flex; gap: 10px; margin-bottom: 12px; }
+.gs-info { flex: 1; font-size: 9.5px; }
+.gs-info table td { padding: 1px 4px; vertical-align: top; }
+.gs-info table td:first-child { font-style: italic; white-space: nowrap; color: #333; }
+.gs-legend { font-size: 8px; }
+.gs-legend table { border-collapse: collapse; }
+.gs-legend table th, .gs-legend table td { border: 1px solid #999; padding: 1px 4px; text-align: center; }
+.gs-legend table th { font-weight: bold; background: #f0f0f0; }
+.gs-table { width: 100%; border-collapse: collapse; font-size: 9.5px; margin-bottom: 16px; }
+.gs-table th { border: 1px solid #333; padding: 5px 3px; text-align: center; font-weight: bold; background: white; }
+.gs-table td { border: 1px solid #555; padding: 4px 3px; text-align: center; }
+.gs-table td.name-col { text-align: left; padding-left: 6px; }
 .gs-table tr:nth-child(even) td { background: #f9f9f9; }
 .failed-row td { color: #c00; }
-
-/* Signatures */
-.gs-signatures {
-    margin-top: 16px;
-    font-size: 9.5px;
-}
-.gs-sig-row {
-    display: flex;
-    gap: 20px;
-    margin-bottom: 20px;
-}
-.gs-sig-block {
-    flex: 1;
-}
-.gs-sig-label {
-    font-style: italic;
-    margin-bottom: 4px;
-}
-.gs-sig-name {
-    font-weight: bold;
-    text-align: center;
-    margin-top: 20px;
-}
-.gs-sig-title {
-    text-align: center;
-    font-style: italic;
-    font-size: 8.5px;
-}
-
-/* Footer */
-.gs-footer {
-    border-top: 1px solid #333;
-    margin-top: 20px;
-    padding-top: 4px;
-    display: flex;
-    justify-content: space-between;
-    font-size: 8px;
-    color: #333;
-}
-
-/* ── PRINT STYLES ─────────────────────────────── */
+.gs-signatures { margin-top: 16px; font-size: 9.5px; }
+.gs-sig-row { display: flex; gap: 20px; margin-bottom: 20px; }
+.gs-sig-block { flex: 1; }
+.gs-sig-label { font-style: italic; margin-bottom: 4px; }
+.gs-sig-name { font-weight: bold; text-align: center; margin-top: 20px; }
+.gs-sig-title { text-align: center; font-style: italic; font-size: 8.5px; }
+.gs-footer { border-top: 1px solid #333; margin-top: 20px; padding-top: 4px;
+             display: flex; justify-content: space-between; font-size: 8px; color: #333; }
 @media print {
     body * { visibility: hidden; }
     .gradesheet-wrapper, .gradesheet-wrapper * { visibility: visible; }
     .gradesheet-wrapper {
-        position: absolute;
-        left: 0; top: 0;
-        box-shadow: none;
-        border: none;
-        padding: 15mm 20mm;
-        max-width: 100%;
-        width: 100%;
+        position: absolute; left: 0; top: 0;
+        box-shadow: none; border: none;
+        padding: 15mm 20mm; max-width: 100%; width: 100%;
     }
     .gs-table tr:nth-child(even) td { background: white !important; }
 }
 </style>
 
-<!-- Toolbar (hidden on print) -->
+<!-- Toolbar -->
 <div class="preview-toolbar">
     <div>
         <strong>📄 Report of Grades Preview</strong>
@@ -321,48 +198,33 @@ echo $OUTPUT->header();
 <!-- Grade Sheet -->
 <div class="gradesheet-wrapper">
 
-    <!-- Top: Logos + University Name -->
+    <!-- Header -->
     <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:10px; width:100%;">
-    
-		<img src="<?php echo $CFG->wwwroot; ?>/local/gradesheet/pix/essu-header.png"
-		     style="width:160px; height:auto;">
+        <img src="<?php echo $CFG->wwwroot; ?>/local/gradesheet/pix/essu-header.png" style="width:160px; height:auto;">
+        <div style="text-align:center; align-self:center;">
+            <div style="font-size:18px; font-weight:bold; letter-spacing:2px;">REPORT OF GRADES</div>
+            <div style="font-size:11px; color:#333; margin-top:4px;">
+                <?php echo $semester; ?> &nbsp;&nbsp; SY <?php echo $schoolyear; ?>
+            </div>
+        </div>
+        <img src="<?php echo $CFG->wwwroot; ?>/local/gradesheet/pix/bagong-pilipinas.png" style="width:80px; height:auto;">
+    </div>
 
-		<div style="text-align:center; padding-top:0px; align-self:center;">
-		    <div style="font-size:18px; font-weight:bold; letter-spacing:2px;">REPORT OF GRADES</div>
-		    <div style="font-size:11px; color:#333; margin-top:4px;">Second Semester &nbsp;&nbsp; SY 2024-2025</div>
-		</div>
-
-		<img src="<?php echo $CFG->wwwroot; ?>/local/gradesheet/pix/bagong-pilipinas.png"
-		     style="width:80px; height:auto;">
-
-	</div>
-
-    <!-- Course Info + Rating Legend -->
+    <!-- Course Info + Legend -->
     <div class="gs-info-legend">
         <div class="gs-info">
             <table>
-                <tr>
-                    <td>Subject and Course No. :</td>
-                    <td><strong><?php echo $coursename; ?></strong></td>
-                </tr>
-                <tr>
-                    <td>Descriptive Title :</td>
-                    <td><strong><?php echo $descriptive; ?></strong></td>
-                </tr>
-                <tr><td>Course and Year :</td><td><strong><?php echo $courseandyear; ?></strong></td></tr>
-				<tr><td>Schedule of Classes :</td><td><strong><?php echo $schedule; ?></strong></td></tr>
-				<tr><td>Number of Units :</td><td><strong><?php echo $units; ?></strong></td></tr>
+                <tr><td>Subject and Course No. :</td><td><strong><?php echo htmlspecialchars($coursenumber); ?></strong></td></tr>
+                <tr><td>Descriptive Title :</td><td><strong><?php echo htmlspecialchars($descriptive); ?></strong></td></tr>
+                <tr><td>Course and Year :</td><td><strong><?php echo htmlspecialchars($courseandyear); ?></strong></td></tr>
+                <tr><td>Schedule of Classes :</td><td><strong><?php echo htmlspecialchars($schedule); ?></strong></td></tr>
+                <tr><td>Number of Units :</td><td><strong><?php echo htmlspecialchars($units); ?></strong></td></tr>
             </table>
         </div>
-
         <div class="gs-legend">
             <table>
                 <thead>
-                    <tr>
-                        <th>Actual<br>Rating</th>
-                        <th>Equivalent<br>Rating</th>
-                        <th>Adjectival<br>Rating</th>
-                    </tr>
+                    <tr><th>Actual<br>Rating</th><th>Equivalent<br>Rating</th><th>Adjectival<br>Rating</th></tr>
                 </thead>
                 <tbody>
                     <tr><td>100</td><td>1.0</td><td>Outstanding</td></tr>
@@ -385,13 +247,19 @@ echo $OUTPUT->header();
     <table class="gs-table">
         <thead>
             <tr>
-                <th style="width:5%">NO.</th>
-                <th style="width:30%">NAME OF STUDENTS</th>
-                <th style="width:14%">STUDENT NO.</th>
-                <th style="width:13%">MIDTERM</th>
-                <th style="width:13%">FINALS</th>
-                <th style="width:13%">AVERAGE</th>
-                <th style="width:12%">REMARKS</th>
+                <th style="width:4%">NO.</th>
+                <th style="width:28%">NAME OF STUDENTS</th>
+                <th style="width:12%">STUDENT NO.</th>
+                <?php if ($hascategories): ?>
+                    <?php foreach ($categories as $cat): ?>
+                    <th><?php echo strtoupper(htmlspecialchars($cat->name)); ?><br>(<?php echo $cat->weight; ?>%)</th>
+                    <?php endforeach; ?>
+                <?php else: ?>
+                    <th style="width:12%">MIDTERM</th>
+                    <th style="width:12%">FINALS</th>
+                <?php endif; ?>
+                <th style="width:11%">AVERAGE</th>
+                <th style="width:10%">REMARKS</th>
             </tr>
         </thead>
         <tbody>
@@ -400,8 +268,19 @@ echo $OUTPUT->header();
                 <td><?php echo $i + 1; ?></td>
                 <td class="name-col"><?php echo htmlspecialchars($row['name']); ?></td>
                 <td><?php echo htmlspecialchars($row['idnumber']); ?></td>
-                <td><?php echo $row['midterm']; ?></td>
-                <td><?php echo $row['finals']; ?></td>
+                <?php if ($hascategories): ?>
+                    <?php foreach ($categories as $cat): ?>
+                    <?php
+                        $catdata = isset($row['cattotals'][$cat->id]) ? $row['cattotals'][$cat->id] : null;
+                        $catavg  = ($catdata && $catdata['count'] > 0)
+                            ? number_format($catdata['total'] / $catdata['count'], 2) : '0.00';
+                    ?>
+                    <td><?php echo $catavg; ?></td>
+                    <?php endforeach; ?>
+                <?php else: ?>
+                    <td><?php echo $row['midterm']; ?></td>
+                    <td><?php echo $row['finals']; ?></td>
+                <?php endif; ?>
                 <td><?php echo $row['average']; ?></td>
                 <td><?php echo $row['remarks']; ?></td>
             </tr>
@@ -409,7 +288,13 @@ echo $OUTPUT->header();
             <tr>
                 <td></td>
                 <td class="name-col"><em>***Nothing Follows***</em></td>
-                <td></td><td></td><td></td><td></td><td></td>
+                <td></td>
+                <?php if ($hascategories): ?>
+                    <?php foreach ($categories as $cat): ?><td></td><?php endforeach; ?>
+                <?php else: ?>
+                    <td></td><td></td>
+                <?php endif; ?>
+                <td></td><td></td>
             </tr>
         </tbody>
     </table>
@@ -419,24 +304,24 @@ echo $OUTPUT->header();
         <div class="gs-sig-row">
             <div class="gs-sig-block">
                 <div class="gs-sig-label">Certified True &amp; Correct:</div>
-                <div class="gs-sig-name"><?php echo $instructor; ?></div>
-				<div class="gs-sig-title">Instructor</div>
+                <div class="gs-sig-name"><?php echo htmlspecialchars($instructor); ?></div>
+                <div class="gs-sig-title">Instructor</div>
             </div>
             <div class="gs-sig-block">
                 <div class="gs-sig-label">Checked:</div>
-                <div class="gs-sig-name"><?php echo $depthead; ?></div>
+                <div class="gs-sig-name"><?php echo htmlspecialchars($depthead); ?></div>
                 <div class="gs-sig-title">Department Head</div>
             </div>
         </div>
         <div class="gs-sig-row">
             <div class="gs-sig-block">
                 <div class="gs-sig-label">Received:</div>
-                <div class="gs-sig-name"><?php echo $registrar; ?></div>
+                <div class="gs-sig-name"><?php echo htmlspecialchars($registrar); ?></div>
                 <div class="gs-sig-title">Registrar</div>
             </div>
             <div class="gs-sig-block">
                 <div class="gs-sig-label">Approved:</div>
-                <div class="gs-sig-name"><?php echo $collegedean; ?></div>
+                <div class="gs-sig-name"><?php echo htmlspecialchars($collegedean); ?></div>
                 <div class="gs-sig-title">College Dean</div>
             </div>
         </div>

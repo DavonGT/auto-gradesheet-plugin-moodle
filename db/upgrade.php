@@ -21,7 +21,6 @@ function xmldb_local_gradesheet_upgrade($oldversion) {
 
     if ($oldversion < 2026031202) {
         $table = new xmldb_table('local_gradesheet_config');
-
         $fields = [
             new xmldb_field('semester',        XMLDB_TYPE_CHAR, '50',  null, null, null, 'Second Semester'),
             new xmldb_field('schoolyear',      XMLDB_TYPE_CHAR, '20',  null, null, null, '2025-2026'),
@@ -35,14 +34,36 @@ function xmldb_local_gradesheet_upgrade($oldversion) {
             new xmldb_field('registrar',       XMLDB_TYPE_CHAR, '100', null, null, null, ''),
             new xmldb_field('college_dean',    XMLDB_TYPE_CHAR, '100', null, null, null, ''),
         ];
-
         foreach ($fields as $field) {
             if (!$dbman->field_exists($table, $field)) {
                 $dbman->add_field($table, $field);
             }
         }
-
         upgrade_plugin_savepoint(true, 2026031202, 'local', 'gradesheet');
+    }
+
+    if ($oldversion < 2026031203) {
+        // New categories table
+        $table = new xmldb_table('local_gradesheet_categories');
+        $table->add_field('id',        XMLDB_TYPE_INTEGER, '10',  null, XMLDB_NOTNULL, XMLDB_SEQUENCE);
+        $table->add_field('courseid',  XMLDB_TYPE_INTEGER, '10',  null, XMLDB_NOTNULL, null);
+        $table->add_field('name',      XMLDB_TYPE_CHAR,    '100', null, XMLDB_NOTNULL, null);
+        $table->add_field('weight',    XMLDB_TYPE_NUMBER,  '5',   2,    XMLDB_NOTNULL, null, '0');
+        $table->add_field('sortorder', XMLDB_TYPE_INTEGER, '5',   null, XMLDB_NOTNULL, null, '0');
+        $table->add_key('primary', XMLDB_KEY_PRIMARY, ['id']);
+        $table->add_index('courseid', XMLDB_INDEX_NOTUNIQUE, ['courseid']);
+        if (!$dbman->table_exists($table)) {
+            $dbman->create_table($table);
+        }
+
+        // Add categoryid column to itemmap
+        $itemmap = new xmldb_table('local_gradesheet_itemmap');
+        $catfield = new xmldb_field('categoryid', XMLDB_TYPE_INTEGER, '10', null, null, null, '0');
+        if (!$dbman->field_exists($itemmap, $catfield)) {
+            $dbman->add_field($itemmap, $catfield);
+        }
+
+        upgrade_plugin_savepoint(true, 2026031203, 'local', 'gradesheet');
     }
 
     return true;

@@ -12,7 +12,7 @@ $PAGE->set_context(context_system::instance());
 $PAGE->set_title(get_string('pluginname', 'local_gradesheet'));
 $PAGE->set_heading(get_string('pluginname', 'local_gradesheet'));
 
-// Transmutation function
+// ── TRANSMUTATION ─────────────────────────────────────────────────────────────
 function transmute($grade) {
     if ($grade >= 97) return '1.00';
     if ($grade >= 94) return '1.25';
@@ -26,13 +26,22 @@ function transmute($grade) {
     return '5.00';
 }
 
-// Helper: compute grades for one student in a course
+// ── GRADE COMPUTATION ─────────────────────────────────────────────────────────
 function compute_student_grades($DB, $courseid, $studentid, $midweight, $finweight) {
     $gitems = $DB->get_records_select(
         'grade_items',
         'courseid = ? AND itemtype != ? AND itemname IS NOT NULL',
         [$courseid, 'course']
     );
+
+    // Load categories
+    $categories = $DB->get_records('local_gradesheet_categories',
+        ['courseid' => $courseid], 'sortorder ASC');
+
+    $cattotals = [];
+    foreach ($categories as $cat) {
+        $cattotals[$cat->id] = ['total' => 0, 'count' => 0, 'weight' => $cat->weight, 'name' => $cat->name];
+    }
 
     $midTotal = 0; $midCount = 0;
     $finTotal = 0; $finCount = 0;
@@ -55,7 +64,16 @@ function compute_student_grades($DB, $courseid, $studentid, $midweight, $finweig
             'courseid'    => $courseid,
             'gradeitemid' => $gitem->id,
         ]);
-        $period = $map ? $map->period : 'finals';
+        $period = $map ? $map->period     : 'finals';
+        $catid  = $map ? $map->categoryid : 0;
+
+        // Add to category totals
+        if ($catid && isset($cattotals[$catid])) {
+            $cattotals[$catid]['total'] += $val;
+            $cattotals[$catid]['count']++;
+        }
+
+        // Track midterm/finals
         if ($period === 'midterm') {
             $midTotal += $val; $midCount++;
         } else {
@@ -63,17 +81,32 @@ function compute_student_grades($DB, $courseid, $studentid, $midweight, $finweig
         }
     }
 
-    $midAvg  = $midCount > 0 ? $midTotal / $midCount : 0;
-    $finAvg  = $finCount > 0 ? $finTotal / $finCount : 0;
-    $average = ($midAvg * $midweight) + ($finAvg * $finweight);
-    $transmuted = ($average >= 75) ? number_format(3.0 - (($average - 75) / 25) * 2.0, 2) : '5.00';
+    // Compute weighted final from categories
+    $weightedFinal = 0;
+    $totalWeight   = 0;
+    foreach ($cattotals as $data) {
+        if ($data['count'] > 0) {
+            $catAvg        = $data['total'] / $data['count'];
+            $weightedFinal += ($catAvg * ($data['weight'] / 100));
+            $totalWeight   += $data['weight'];
+        }
+    }
+
+    // Fallback to midterm/finals if no categories set
+    $midAvg = $midCount > 0 ? $midTotal / $midCount : 0;
+    $finAvg = $finCount > 0 ? $finTotal / $finCount : 0;
+
+    if ($totalWeight == 0) {
+        $weightedFinal = ($midAvg * $midweight) + ($finAvg * $finweight);
+    }
 
     return [
-        'midterm'   => $midAvg,
-        'finals'    => $finAvg,
-        'average'   => $average,
-        'transmuted'=> $transmuted,
-        'remarks'   => $average >= 75 ? 'PASSED' : 'FAILED',
+        'midterm'    => $midAvg,
+        'finals'     => $finAvg,
+        'average'    => $weightedFinal,
+        'cattotals'  => $cattotals,
+        'transmuted' => transmute($weightedFinal),
+        'remarks'    => $weightedFinal >= 75 ? 'PASSED' : 'FAILED',
     ];
 }
 
@@ -83,7 +116,6 @@ echo $OUTPUT->header();
 $isadmin   = is_siteadmin();
 $isstudent = false;
 
-// Check if user is a student in the selected course
 if ($courseid) {
     $ctx   = context_course::instance($courseid);
     $roles = get_user_roles($ctx, $USER->id);
@@ -101,7 +133,6 @@ if ($isadmin) {
     unset($courses[1]);
 } else {
     $courses = enrol_get_my_courses();
-    // Remove site course
     unset($courses[1]);
 }
 
@@ -126,17 +157,19 @@ echo '</form>';
 if ($courseid) {
     $context    = context_course::instance($courseid);
     $config     = $DB->get_record('local_gradesheet_config', ['courseid' => $courseid]);
-    $quizweight = $config ? floatval($config->quizweight)     / 100 : 0.30;
-    $examweight = $config ? floatval($config->examweight)     / 100 : 0.40;
-    $actweight  = $config ? floatval($config->activityweight) / 100 : 0.30;
-    $qpct       = $config ? $config->quizweight     : 30;
-    $epct       = $config ? $config->examweight     : 40;
-    $apct       = $config ? $config->activityweight : 30;
+    $midweight  = $config ? floatval($config->quizweight)  / 100 : 0.50;
+    $finweight  = $config ? floatval($config->examweight)  / 100 : 0.50;
+    $mpct       = $config ? $config->quizweight  : 50;
+    $fpct       = $config ? $config->examweight  : 50;
     $coursename = format_string($DB->get_field('course', 'fullname', ['id' => $courseid]));
 
-    // ── STUDENT VIEW ─────────────────────────────────────────────────────────
+    // Load categories for display
+    $categories = $DB->get_records('local_gradesheet_categories',
+        ['courseid' => $courseid], 'sortorder ASC');
+
+    // ── STUDENT VIEW ──────────────────────────────────────────────────────────
     if ($isstudent && !$isadmin) {
-        $grades = compute_student_grades($DB, $courseid, $USER->id, $quizweight, $examweight);
+        $grades = compute_student_grades($DB, $courseid, $USER->id, $midweight, $finweight);
         $color  = $grades['remarks'] === 'PASSED' ? '#155724' : '#721c24';
         $bg     = $grades['remarks'] === 'PASSED' ? '#d4edda' : '#f8d7da';
         $icon   = $grades['remarks'] === 'PASSED' ? '✅' : '❌';
@@ -145,7 +178,7 @@ if ($courseid) {
         echo "<h4>My Grades — {$coursename}</h4>";
         echo '
         <style>
-            .grade-card { max-width: 500px; margin: 0 auto; }
+            .grade-card { max-width: 520px; margin: 0 auto; }
             .grade-card .card-header {
                 background: #1a1a2e; color: white;
                 font-size: 16px; font-weight: bold; text-align: center;
@@ -160,8 +193,7 @@ if ($courseid) {
                 border-radius: 8px; margin-top: 15px;
                 font-size: 20px; font-weight: bold;
             }
-        </style>
-        ';
+        </style>';
 
         echo '<div class="grade-card">';
         echo '<div class="card">';
@@ -181,18 +213,32 @@ if ($courseid) {
                 <span class="grade-value">' . $coursename . '</span>
               </div>';
 
-        echo '<div class="grade-row">
-		    <span class="grade-label">Midterm (' . $qpct . '%)</span>
-		    <span class="grade-value">' . number_format($grades['midterm'], 2) . '</span>
-		  </div>';
-		echo '<div class="grade-row">
-				<span class="grade-label">Finals (' . $epct . '%)</span>
-				<span class="grade-value">' . number_format($grades['finals'], 2) . '</span>
-			  </div>';
+        // Show category breakdown if categories exist
+        if (!empty($categories)) {
+            foreach ($grades['cattotals'] as $catid => $data) {
+                if ($data['count'] > 0) {
+                    $catAvg = $data['total'] / $data['count'];
+                    echo '<div class="grade-row">
+                            <span class="grade-label">' . s($data['name']) . ' (' . $data['weight'] . '%)</span>
+                            <span class="grade-value">' . number_format($catAvg, 2) . '</span>
+                          </div>';
+                }
+            }
+        } else {
+            // Fallback: show midterm/finals
+            echo '<div class="grade-row">
+                    <span class="grade-label">Midterm (' . $mpct . '%)</span>
+                    <span class="grade-value">' . number_format($grades['midterm'], 2) . '</span>
+                  </div>';
+            echo '<div class="grade-row">
+                    <span class="grade-label">Finals (' . $fpct . '%)</span>
+                    <span class="grade-value">' . number_format($grades['finals'], 2) . '</span>
+                  </div>';
+        }
 
         echo '<div class="grade-row" style="background:#f8f9fa">
-                <span class="grade-label">Final Grade</span>
-                <span class="grade-value">' . number_format($grades['final'], 2) . '</span>
+                <span class="grade-label">Final Average</span>
+                <span class="grade-value">' . number_format($grades['average'], 2) . '</span>
               </div>';
         echo '<div class="grade-row" style="background:#f8f9fa">
                 <span class="grade-label">Transmuted Grade</span>
@@ -200,17 +246,15 @@ if ($courseid) {
               </div>';
 
         echo '</div></div>';
-
         echo '<div class="remarks-box" style="background:' . $bg . '; color:' . $color . '">
                 ' . $icon . ' ' . $grades['remarks'] . '
               </div>';
-
         echo '</div>';
 
     // ── FACULTY / ADMIN VIEW ──────────────────────────────────────────────────
     } else {
         if (!has_capability('local/gradesheet:manage', $context)) {
-            echo $OUTPUT->notification('You do not have permission to view grade sheets for this course.', 'error');
+            echo $OUTPUT->notification('You do not have permission to view grade sheets.', 'error');
             echo $OUTPUT->footer();
             exit;
         }
@@ -224,22 +268,27 @@ if ($courseid) {
 
         echo '<hr>';
         echo "<h4>Students and Grades — {$coursename}</h4>";
-        echo '<a href="preview.php?courseid=' . $courseid . '" class="btn btn-primary mb-3">👁 Preview & Print</a> ';
-		echo '<a href="export.php?courseid=' . $courseid . '" class="btn btn-success mb-3">⬇ Download PDF</a> ';
-		echo '<a href="export_excel.php?courseid=' . $courseid . '" class="btn btn-warning mb-3">📊 Download Excel</a> ';
-		echo '<a href="course_settings.php?courseid=' . $courseid . '" class="btn btn-secondary mb-3">⚙ Formula Settings</a>';
+        echo '<a href="preview.php?courseid='      . $courseid . '" class="btn btn-primary mb-3">👁 Preview & Print</a> ';
+        echo '<a href="export.php?courseid='       . $courseid . '" class="btn btn-success mb-3">⬇ Download PDF</a> ';
+        echo '<a href="export_excel.php?courseid=' . $courseid . '" class="btn btn-warning mb-3">📊 Download Excel</a> ';
+        echo '<a href="course_settings.php?courseid=' . $courseid . '" class="btn btn-secondary mb-3">⚙ Settings</a>';
 
+        // Build dynamic table headers
         echo '<table class="table table-bordered table-striped">';
-        echo "<thead class='thead-dark'><tr>
-		    <th>#</th>
-		    <th>Student ID</th>
-		    <th>Student Name</th>
-		    <th>Midterm ({$qpct}%)</th>
-		    <th>Finals ({$epct}%)</th>
-		    <th>Average</th>
-		    <th>Transmuted</th>
-		    <th>Remarks</th>
-		  </tr></thead>";
+        echo '<thead class="thead-dark"><tr>';
+        echo '<th>#</th><th>Student ID</th><th>Student Name</th>';
+
+        if (!empty($categories)) {
+            foreach ($categories as $cat) {
+                echo '<th>' . s($cat->name) . ' (' . $cat->weight . '%)</th>';
+            }
+        } else {
+            echo '<th>Midterm (' . $mpct . '%)</th>';
+            echo '<th>Finals (' . $fpct . '%)</th>';
+        }
+
+        echo '<th>Average</th><th>Transmuted</th><th>Remarks</th>';
+        echo '</tr></thead>';
         echo '<tbody>';
 
         $passcount = 0;
@@ -258,28 +307,42 @@ if ($courseid) {
             }
             if ($isteacher) continue;
 
-            $g = compute_student_grades($DB, $courseid, $student->id, $quizweight, $examweight);
+            $g          = compute_student_grades($DB, $courseid, $student->id, $midweight, $finweight);
             $badgeclass = $g['remarks'] === 'PASSED' ? 'badge-success' : 'badge-danger';
 
             if ($g['remarks'] === 'PASSED') $passcount++;
             else $failcount++;
 
             echo "<tr>
-				<td>{$rownum}</td>
-				<td>{$student->idnumber}</td>
-				<td>{$student->lastname}, {$student->firstname}</td>
-				<td>" . number_format($g['midterm'],   2) . "</td>
-				<td>" . number_format($g['finals'],    2) . "</td>
-				<td>" . number_format($g['average'],   2) . "</td>
-				<td><strong>{$g['transmuted']}</strong></td>
-				<td><span class='badge {$badgeclass}'>{$g['remarks']}</span></td>
-			  </tr>";
+                <td>{$rownum}</td>
+                <td>{$student->idnumber}</td>
+                <td>{$student->lastname}, {$student->firstname}</td>";
+
+            // Dynamic category columns
+            if (!empty($categories)) {
+                foreach ($categories as $cat) {
+                    $catdata = isset($g['cattotals'][$cat->id]) ? $g['cattotals'][$cat->id] : null;
+                    $catavg  = ($catdata && $catdata['count'] > 0)
+                        ? number_format($catdata['total'] / $catdata['count'], 2)
+                        : '0.00';
+                    echo "<td>{$catavg}</td>";
+                }
+            } else {
+                echo '<td>' . number_format($g['midterm'], 2) . '</td>';
+                echo '<td>' . number_format($g['finals'],  2) . '</td>';
+            }
+
+            echo '<td>' . number_format($g['average'],   2) . '</td>';
+            echo '<td><strong>' . $g['transmuted'] . '</strong></td>';
+            echo '<td><span class="badge ' . $badgeclass . '">' . $g['remarks'] . '</span></td>';
+            echo '</tr>';
+
             $rownum++;
         }
 
         echo '</tbody></table>';
 
-        // Summary
+        // ── SUMMARY ──────────────────────────────────────────────────────────
         $total    = $passcount + $failcount;
         $passrate = $total > 0 ? round(($passcount / $total) * 100, 1) : 0;
         $failrate = $total > 0 ? round(($failcount / $total) * 100, 1) : 0;
@@ -295,7 +358,7 @@ if ($courseid) {
         echo '</div>';
         echo "<div class='progress mt-2' style='height:25px'>
                 <div class='progress-bar bg-success' style='width:{$passrate}%'>{$passrate}% Passed</div>
-                <div class='progress-bar bg-danger' style='width:{$failrate}%'>{$failrate}% Failed</div>
+                <div class='progress-bar bg-danger'  style='width:{$failrate}%'>{$failrate}% Failed</div>
               </div>";
         echo '</div></div>';
     }
