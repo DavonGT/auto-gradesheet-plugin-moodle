@@ -49,6 +49,19 @@ $gitems   = $DB->get_records_select(
     [$courseid, 'course']
 );
 
+// Transmute to equivalent rating
+function transmute_equiv($grade) {
+	if ($grade == 0)    return '-';
+	if ($grade == 100)  return '1.0';
+	if ($grade >= 94)   return number_format(1.1 + (99 - $grade) * 0.1, 1);
+	if ($grade >= 89)   return number_format(1.6 + (93 - $grade) * 0.1, 1);
+	if ($grade >= 84)   return number_format(2.1 + (88 - $grade) * 0.1, 1);
+	if ($grade >= 79)   return number_format(2.6 + (83 - $grade) * 0.1, 1);
+	if ($grade >= 75)   return number_format(3.1 + (78 - $grade) * 0.1, 1);
+	if ($grade >= 69)   return number_format(3.6 + (74 - $grade) * 0.1, 1);
+	return '5.0';
+}
+
 // Build rows
 $rows      = [];
 $passcount = 0;
@@ -102,10 +115,16 @@ foreach ($students as $student) {
     }
 
     $midAvg = $midCount > 0 ? $midTotal / $midCount : 0;
-    $finAvg = $finCount > 0 ? $finTotal / $finCount : 0;
-    if ($totalWeight == 0) {
-        $weightedFinal = ($midAvg * $midweight) + ($finAvg * $finweight);
-    }
+	$finAvg = $finCount > 0 ? $finTotal / $finCount : 0;
+	if ($totalWeight == 0) {
+		$weightedFinal = ($midAvg * $midweight) + ($finAvg * $finweight);
+	}
+
+	
+
+	$midTransmuted = transmute_equiv($midAvg);
+	$finTransmuted = transmute_equiv($finAvg);
+	$avgTransmuted = transmute_equiv($weightedFinal);
 
     $remarks = $weightedFinal >= 75 ? 'Passed' : 'Failed';
     if ($remarks === 'Passed') $passcount++; else $failcount++;
@@ -113,9 +132,9 @@ foreach ($students as $student) {
     $rows[] = [
         'idnumber'  => $student->idnumber,
         'name'      => $student->lastname . ', ' . $student->firstname,
-        'midterm'   => round($midAvg, 2),
-        'finals'    => round($finAvg, 2),
-        'average'   => round($weightedFinal, 2),
+        'midterm'   => $midTransmuted,
+        'finals'    => $finTransmuted,
+        'average'   => $avgTransmuted,
         'remarks'   => $remarks,
         'cattotals' => $cattotals,
     ];
@@ -131,24 +150,13 @@ $colNO      = 'A';
 $colNAME    = 'B';
 $colSTUDENT = 'C';
 
-$dynamicCols = []; // e.g. ['D', 'E'] for categories or ['D', 'E'] for midterm/finals
-$colIdx      = 4;  // D=4, E=5, F=6...
-
 $alphabet = range('A', 'Z');
-
-if ($hascategories) {
-    foreach ($catlist as $cat) {
-        $dynamicCols[$cat->id] = $alphabet[$colIdx - 1];
-        $colIdx++;
-    }
-} else {
-    $dynamicCols['midterm'] = $alphabet[$colIdx - 1]; $colIdx++;
-    $dynamicCols['finals']  = $alphabet[$colIdx - 1]; $colIdx++;
-}
-
-$colAVERAGE = $alphabet[$colIdx - 1]; $colIdx++;
-$colREMARKS = $alphabet[$colIdx - 1];
-$lastCol    = $colREMARKS;
+$dynamicCols            = [];
+$dynamicCols['midterm'] = 'D';
+$dynamicCols['finals']  = 'E';
+$colAVERAGE             = 'F';
+$colREMARKS             = 'G';
+$lastCol                = 'G';
 
 // ── BUILD SPREADSHEET ─────────────────────────────────────────────────────────
 $spreadsheet = new Spreadsheet();
@@ -245,15 +253,8 @@ $sheet->setCellValue('A' . $tableHeaderRow, 'NO.');
 $sheet->setCellValue('B' . $tableHeaderRow, 'NAME OF STUDENTS');
 $sheet->setCellValue('C' . $tableHeaderRow, 'STUDENT NO.');
 
-if ($hascategories) {
-    foreach ($catlist as $cat) {
-        $col = $dynamicCols[$cat->id];
-        $sheet->setCellValue($col . $tableHeaderRow, strtoupper($cat->name) . ' (' . $cat->weight . '%)');
-    }
-} else {
-    $sheet->setCellValue($dynamicCols['midterm'] . $tableHeaderRow, 'MIDTERM');
-    $sheet->setCellValue($dynamicCols['finals']  . $tableHeaderRow, 'FINALS');
-}
+$sheet->setCellValue('D' . $tableHeaderRow, 'MIDTERM');
+$sheet->setCellValue('E' . $tableHeaderRow, 'FINALS');
 
 $sheet->setCellValue($colAVERAGE . $tableHeaderRow, 'AVERAGE');
 $sheet->setCellValue($colREMARKS . $tableHeaderRow, 'REMARKS');
@@ -281,18 +282,8 @@ foreach ($rows as $i => $row) {
     $sheet->setCellValue('B' . $dataRow, $row['name']);
     $sheet->setCellValue('C' . $dataRow, $row['idnumber']);
 
-    if ($hascategories) {
-        foreach ($catlist as $cat) {
-            $col     = $dynamicCols[$cat->id];
-            $catdata = isset($row['cattotals'][$cat->id]) ? $row['cattotals'][$cat->id] : null;
-            $catavg  = ($catdata && $catdata['count'] > 0)
-                ? round($catdata['total'] / $catdata['count'], 2) : 0;
-            $sheet->setCellValue($col . $dataRow, $catavg);
-        }
-    } else {
-        $sheet->setCellValue($dynamicCols['midterm'] . $dataRow, $row['midterm']);
-        $sheet->setCellValue($dynamicCols['finals']  . $dataRow, $row['finals']);
-    }
+    $sheet->setCellValue('D' . $dataRow, $row['midterm']);
+	$sheet->setCellValue('E' . $dataRow, $row['finals']);
 
     $sheet->setCellValue($colAVERAGE . $dataRow, $row['average']);
     $sheet->setCellValue($colREMARKS . $dataRow, $row['remarks']);
@@ -404,24 +395,14 @@ $sheet->getColumnDimension('A')->setWidth(6);
 $sheet->getColumnDimension('B')->setWidth(32);
 $sheet->getColumnDimension('C')->setWidth(16);
 
-if ($hascategories) {
-    foreach ($dynamicCols as $catid => $col) {
-        $sheet->getColumnDimension($col)->setWidth(14);
-    }
-} else {
-    $sheet->getColumnDimension($dynamicCols['midterm'])->setWidth(12);
-    $sheet->getColumnDimension($dynamicCols['finals'])->setWidth(12);
-}
+$sheet->getColumnDimension('D')->setWidth(12);
+$sheet->getColumnDimension('E')->setWidth(12);
 
 $sheet->getColumnDimension($colAVERAGE)->setWidth(12);
 $sheet->getColumnDimension($colREMARKS)->setWidth(12);
 
 // ── PAGE SETUP ────────────────────────────────────────────────────────────────
-$orientation = $hascategories && count($catlist) > 3
-    ? \PhpOffice\PhpSpreadsheet\Worksheet\PageSetup::ORIENTATION_LANDSCAPE
-    : \PhpOffice\PhpSpreadsheet\Worksheet\PageSetup::ORIENTATION_PORTRAIT;
-
-$sheet->getPageSetup()->setOrientation($orientation);
+$sheet->getPageSetup()->setOrientation(\PhpOffice\PhpSpreadsheet\Worksheet\PageSetup::ORIENTATION_PORTRAIT);
 $sheet->getPageSetup()->setPaperSize(\PhpOffice\PhpSpreadsheet\Worksheet\PageSetup::PAPERSIZE_LETTER);
 $sheet->getPageMargins()->setTop(0.5)->setBottom(0.5)->setLeft(0.5)->setRight(0.5);
 $sheet->getPageSetup()->setFitToPage(true);

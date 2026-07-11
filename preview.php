@@ -45,6 +45,19 @@ $gitems   = $DB->get_records_select(
     [$courseid, 'course']
 );
 
+// Transmute to equivalent rating
+function transmute_equiv($grade) {
+	if ($grade == 0)    return '-';
+	if ($grade == 100)  return '1.0';
+	if ($grade >= 94)   return number_format(1.1 + (99 - $grade) * 0.1, 1);
+	if ($grade >= 89)   return number_format(1.6 + (93 - $grade) * 0.1, 1);
+	if ($grade >= 84)   return number_format(2.1 + (88 - $grade) * 0.1, 1);
+	if ($grade >= 79)   return number_format(2.6 + (83 - $grade) * 0.1, 1);
+	if ($grade >= 75)   return number_format(3.1 + (78 - $grade) * 0.1, 1);
+	if ($grade >= 69)   return number_format(3.6 + (74 - $grade) * 0.1, 1);
+	return '5.0';
+}
+
 $rows      = [];
 $passcount = 0;
 $failcount = 0;
@@ -97,10 +110,16 @@ foreach ($students as $student) {
     }
 
     $midAvg = $midCount > 0 ? $midTotal / $midCount : 0;
-    $finAvg = $finCount > 0 ? $finTotal / $finCount : 0;
-    if ($totalWeight == 0) {
-        $weightedFinal = ($midAvg * $midweight) + ($finAvg * $finweight);
-    }
+	$finAvg = $finCount > 0 ? $finTotal / $finCount : 0;
+	if ($totalWeight == 0) {
+		$weightedFinal = ($midAvg * $midweight) + ($finAvg * $finweight);
+	}
+
+	
+
+	$midTransmuted = transmute_equiv($midAvg);
+	$finTransmuted = transmute_equiv($finAvg);
+	$avgTransmuted = transmute_equiv($weightedFinal);
 
     $remarks = get_remarks_prev($weightedFinal);
     if ($remarks === 'Passed') $passcount++; else $failcount++;
@@ -108,9 +127,9 @@ foreach ($students as $student) {
     $rows[] = [
         'idnumber'  => $student->idnumber,
         'name'      => $student->lastname . ', ' . $student->firstname,
-        'midterm'   => number_format($midAvg, 2),
-        'finals'    => number_format($finAvg, 2),
-        'average'   => number_format($weightedFinal, 2),
+        'midterm'   => $midTransmuted,
+        'finals'    => $finTransmuted,
+        'average'   => $avgTransmuted,
         'remarks'   => $remarks,
         'cattotals' => $cattotals,
     ];
@@ -250,14 +269,8 @@ echo $OUTPUT->header();
                 <th style="width:4%">NO.</th>
                 <th style="width:28%">NAME OF STUDENTS</th>
                 <th style="width:12%">STUDENT NO.</th>
-                <?php if ($hascategories): ?>
-                    <?php foreach ($categories as $cat): ?>
-                    <th><?php echo strtoupper(htmlspecialchars($cat->name)); ?><br>(<?php echo $cat->weight; ?>%)</th>
-                    <?php endforeach; ?>
-                <?php else: ?>
-                    <th style="width:12%">MIDTERM</th>
-                    <th style="width:12%">FINALS</th>
-                <?php endif; ?>
+                <th style="width:13%">MIDTERM</th>
+				<th style="width:13%">FINALS</th>
                 <th style="width:11%">AVERAGE</th>
                 <th style="width:10%">REMARKS</th>
             </tr>
@@ -268,19 +281,8 @@ echo $OUTPUT->header();
                 <td><?php echo $i + 1; ?></td>
                 <td class="name-col"><?php echo htmlspecialchars($row['name']); ?></td>
                 <td><?php echo htmlspecialchars($row['idnumber']); ?></td>
-                <?php if ($hascategories): ?>
-                    <?php foreach ($categories as $cat): ?>
-                    <?php
-                        $catdata = isset($row['cattotals'][$cat->id]) ? $row['cattotals'][$cat->id] : null;
-                        $catavg  = ($catdata && $catdata['count'] > 0)
-                            ? number_format($catdata['total'] / $catdata['count'], 2) : '0.00';
-                    ?>
-                    <td><?php echo $catavg; ?></td>
-                    <?php endforeach; ?>
-                <?php else: ?>
-                    <td><?php echo $row['midterm']; ?></td>
-                    <td><?php echo $row['finals']; ?></td>
-                <?php endif; ?>
+                <td><?php echo $row['midterm']; ?></td>
+				<td><?php echo $row['finals']; ?></td>
                 <td><?php echo $row['average']; ?></td>
                 <td><?php echo $row['remarks']; ?></td>
             </tr>
@@ -289,11 +291,7 @@ echo $OUTPUT->header();
                 <td></td>
                 <td class="name-col"><em>***Nothing Follows***</em></td>
                 <td></td>
-                <?php if ($hascategories): ?>
-                    <?php foreach ($categories as $cat): ?><td></td><?php endforeach; ?>
-                <?php else: ?>
-                    <td></td><td></td>
-                <?php endif; ?>
+                <td></td><td></td>
                 <td></td><td></td>
             </tr>
         </tbody>

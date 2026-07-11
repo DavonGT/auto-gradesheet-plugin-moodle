@@ -54,6 +54,19 @@ $gitems   = $DB->get_records_select(
     [$courseid, 'course']
 );
 
+// Transmute to equivalent rating
+function transmute_equiv($grade) {
+	if ($grade == 0)    return '-';
+	if ($grade == 100)  return '1.0';
+	if ($grade >= 94)   return number_format(1.1 + (99 - $grade) * 0.1, 1);
+	if ($grade >= 89)   return number_format(1.6 + (93 - $grade) * 0.1, 1);
+	if ($grade >= 84)   return number_format(2.1 + (88 - $grade) * 0.1, 1);
+	if ($grade >= 79)   return number_format(2.6 + (83 - $grade) * 0.1, 1);
+	if ($grade >= 75)   return number_format(3.1 + (78 - $grade) * 0.1, 1);
+	if ($grade >= 69)   return number_format(3.6 + (74 - $grade) * 0.1, 1);
+	return '5.0';
+}
+
 // Build rows
 $rows      = [];
 $passcount = 0;
@@ -109,10 +122,16 @@ foreach ($students as $student) {
     }
 
     $midAvg = $midCount > 0 ? $midTotal / $midCount : 0;
-    $finAvg = $finCount > 0 ? $finTotal / $finCount : 0;
-    if ($totalWeight == 0) {
-        $weightedFinal = ($midAvg * $midweight) + ($finAvg * $finweight);
-    }
+	$finAvg = $finCount > 0 ? $finTotal / $finCount : 0;
+	if ($totalWeight == 0) {
+		$weightedFinal = ($midAvg * $midweight) + ($finAvg * $finweight);
+	}
+
+	
+
+	$midTransmuted = transmute_equiv($midAvg);
+	$finTransmuted = transmute_equiv($finAvg);
+	$avgTransmuted = transmute_equiv($weightedFinal);
 
     $remarks = $weightedFinal >= 75 ? 'Passed' : 'Failed';
     if ($remarks === 'Passed') $passcount++; else $failcount++;
@@ -120,9 +139,9 @@ foreach ($students as $student) {
     $row = [
         'idnumber'   => $student->idnumber,
         'name'       => $student->lastname . ', ' . $student->firstname,
-        'midterm'    => number_format($midAvg, 2),
-        'finals'     => number_format($finAvg, 2),
-        'average'    => number_format($weightedFinal, 2),
+        'midterm'    => $midTransmuted,
+        'finals'     => $finTransmuted,
+        'average'    => $avgTransmuted,
         'remarks'    => $remarks,
         'cattotals'  => $cattotals,
     ];
@@ -214,34 +233,13 @@ $pdf->Ln(4);
 // ── TABLE HEADER ──────────────────────────────────────────────────────────────
 $pdf->SetFont('helvetica', 'B', 8);
 $pdf->SetTextColor(0, 0, 0);
-
-if ($hascategories) {
-    // Dynamic columns based on categories
-    $catcount   = count($categories);
-    $fixedWidth = 10 + 55 + 25; // NO + NAME + STUDENT NO
-    $remaining  = 180 - $fixedWidth;
-    $catWidth   = floor(($remaining - 20 - 18) / $catcount); // leave room for Average + Remarks
-    $avgWidth   = 20;
-    $remWidth   = 18;
-
-    $pdf->Cell(10, 8, 'NO.',          1, 0, 'C');
-    $pdf->Cell(55, 8, 'NAME OF STUDENTS', 1, 0, 'C');
-    $pdf->Cell(25, 8, 'STUDENT NO.', 1, 0, 'C');
-    foreach ($categories as $cat) {
-        $pdf->Cell($catWidth, 8, strtoupper($cat->name) . ' (' . $cat->weight . '%)', 1, 0, 'C');
-    }
-    $pdf->Cell($avgWidth, 8, 'AVERAGE', 1, 0, 'C');
-    $pdf->Cell($remWidth, 8, 'REMARKS', 1, 1, 'C');
-
-} else {
-    // Default Midterm/Finals
-    $col     = [10, 60, 28, 20, 20, 20, 22];
-    $headers = ['NO.', 'NAME OF STUDENTS', 'STUDENT NO.', 'MIDTERM', 'FINALS', 'AVERAGE', 'REMARKS'];
-    foreach ($headers as $i => $h) {
-        $pdf->Cell($col[$i], 8, $h, 1, 0, 'C');
-    }
-    $pdf->Ln();
+// Default Midterm/Finals
+$col     = [10, 60, 28, 20, 20, 20, 22];
+$headers = ['NO.', 'NAME OF STUDENTS', 'STUDENT NO.', 'MIDTERM', 'FINALS', 'AVERAGE', 'REMARKS'];
+foreach ($headers as $i => $h) {
+    $pdf->Cell($col[$i], 8, $h, 1, 0, 'C');
 }
+$pdf->Ln();
 
 // ── DATA ROWS ─────────────────────────────────────────────────────────────────
 $pdf->SetFont('helvetica', '', 8);
@@ -253,54 +251,25 @@ foreach ($rows as $i => $row) {
     $isFailed = ($row['remarks'] === 'Failed');
     $pdf->SetTextColor(0, 0, 0);
 
-    if ($hascategories) {
-        $pdf->Cell(10,       6, $i + 1,        1, 0, 'C', $fill);
-        $pdf->Cell(55,       6, $row['name'],   1, 0, 'L', $fill);
-        $pdf->Cell(25,       6, $row['idnumber'],1,0, 'C', $fill);
-
-        foreach ($categories as $cat) {
-            $catdata = isset($row['cattotals'][$cat->id]) ? $row['cattotals'][$cat->id] : null;
-            $catavg  = ($catdata && $catdata['count'] > 0)
-                ? number_format($catdata['total'] / $catdata['count'], 2) : '0.00';
-            $pdf->Cell($catWidth, 6, $catavg, 1, 0, 'C', $fill);
-        }
-
-        $pdf->Cell($avgWidth, 6, $row['average'], 1, 0, 'C', $fill);
-
-        if ($isFailed) $pdf->SetTextColor(180, 0, 0);
-        $pdf->Cell($remWidth, 6, $row['remarks'], 1, 1, 'C', $fill);
-        $pdf->SetTextColor(0, 0, 0);
-
-    } else {
-        if ($isFailed) $pdf->SetTextColor(180, 0, 0);
-        $pdf->Cell($col[0], 6, $i + 1,          1, 0, 'C', $fill);
-        $pdf->SetTextColor(0, 0, 0);
-        $pdf->Cell($col[1], 6, $row['name'],     1, 0, 'L', $fill);
-        $pdf->Cell($col[2], 6, $row['idnumber'], 1, 0, 'C', $fill);
-        $pdf->Cell($col[3], 6, $row['midterm'],  1, 0, 'C', $fill);
-        $pdf->Cell($col[4], 6, $row['finals'],   1, 0, 'C', $fill);
-        $pdf->Cell($col[5], 6, $row['average'],  1, 0, 'C', $fill);
-        if ($isFailed) $pdf->SetTextColor(180, 0, 0);
-        $pdf->Cell($col[6], 6, $row['remarks'],  1, 1, 'C', $fill);
-        $pdf->SetTextColor(0, 0, 0);
-    }
+    if ($isFailed) $pdf->SetTextColor(180, 0, 0);
+    $pdf->Cell($col[0], 6, $i + 1,          1, 0, 'C', $fill);
+    $pdf->SetTextColor(0, 0, 0);
+    $pdf->Cell($col[1], 6, $row['name'],     1, 0, 'L', $fill);
+    $pdf->Cell($col[2], 6, $row['idnumber'], 1, 0, 'C', $fill);
+    $pdf->Cell($col[3], 6, $row['midterm'],  1, 0, 'C', $fill);
+    $pdf->Cell($col[4], 6, $row['finals'],   1, 0, 'C', $fill);
+    $pdf->Cell($col[5], 6, $row['average'],  1, 0, 'C', $fill);
+    if ($isFailed) $pdf->SetTextColor(180, 0, 0);
+    $pdf->Cell($col[6], 6, $row['remarks'],  1, 1, 'C', $fill);
+    $pdf->SetTextColor(0, 0, 0);
 }
 
 // Nothing follows row
 $pdf->SetFont('helvetica', 'I', 8);
-if ($hascategories) {
-    $pdf->Cell(10,       6, '',                     1, 0, 'C');
-    $pdf->Cell(55,       6, '***Nothing Follows***', 1, 0, 'L');
-    $pdf->Cell(25,       6, '',                     1, 0, 'C');
-    foreach ($categories as $cat) $pdf->Cell($catWidth, 6, '', 1, 0, 'C');
-    $pdf->Cell($avgWidth, 6, '', 1, 0, 'C');
-    $pdf->Cell($remWidth, 6, '', 1, 1, 'C');
-} else {
-    $pdf->Cell($col[0], 6, '',                     1, 0, 'C');
-    $pdf->Cell($col[1], 6, '***Nothing Follows***', 1, 0, 'L');
-    foreach ([2,3,4,5,6] as $ci) $pdf->Cell($col[$ci], 6, '', 1, 0, 'C');
-    $pdf->Ln();
-}
+$pdf->Cell($col[0], 6, '',                     1, 0, 'C');
+$pdf->Cell($col[1], 6, '***Nothing Follows***', 1, 0, 'L');
+foreach ([2,3,4,5,6] as $ci) $pdf->Cell($col[$ci], 6, '', 1, 0, 'C');
+$pdf->Ln();
 
 $pdf->Ln(6);
 
