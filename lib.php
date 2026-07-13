@@ -5,7 +5,7 @@ function local_gradesheet_extend_navigation_course($navigation, $course, $contex
     if (isloggedin() && !isguestuser()) {
         $url  = new moodle_url('/local/gradesheet/index.php', ['courseid' => $course->id]);
         $node = navigation_node::create(
-            '📋 Grade Sheet',
+            'Grade Sheet',
             $url,
             navigation_node::TYPE_CUSTOM,
             null,
@@ -20,7 +20,7 @@ function local_gradesheet_extend_navigation(global_navigation $nav) {
     if (isloggedin() && !isguestuser()) {
         $url  = new moodle_url('/local/gradesheet/index.php');
         $node = $nav->add(
-            '📋 Grade Sheet',
+            'Grade Sheet',
             $url,
             navigation_node::TYPE_CUSTOM,
             null,
