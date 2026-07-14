@@ -9,6 +9,12 @@ $courseid = required_param('courseid', PARAM_INT);
 $context  = context_course::instance($courseid);
 require_capability('local/gradesheet:manage', $context);
 
+$PAGE->set_url('/local/gradesheet/preview.php', ['courseid' => $courseid]);
+$PAGE->set_context($context);
+$PAGE->set_title(get_string('pluginname', 'local_gradesheet'));
+$PAGE->set_heading(get_string('pluginname', 'local_gradesheet'));
+
+
 function get_remarks_prev($grade) {
     return ($grade >= 75) ? 'Passed' : 'Failed';
 }
@@ -162,7 +168,7 @@ echo $OUTPUT->header();
     border: 1px solid #ccc;
     box-shadow: 0 4px 15px rgba(0,0,0,0.15);
     padding: 30px 35px;
-    max-width: 860px;
+    max-width: 794px;
     margin: 0 auto 40px auto;
     font-family: Arial, sans-serif;
     font-size: 10px;
@@ -180,12 +186,12 @@ echo $OUTPUT->header();
 .gs-table td { border: 1px solid #555; padding: 4px 3px; text-align: center; }
 .gs-table td.name-col { text-align: left; padding-left: 6px; }
 .gs-table tr:nth-child(even) td { background: #f9f9f9; }
-.failed-row td { color: #c00; }
-.gs-signatures { margin-top: 16px; font-size: 9.5px; }
-.gs-sig-row { display: flex; gap: 20px; margin-bottom: 20px; }
+.failed-cell { color: #b40000; }
+.gs-signatures { margin-top: 4px; font-size: 9px; }
+.gs-sig-row { display: flex; gap: 20px; margin-bottom: 8px; }
 .gs-sig-block { flex: 1; }
 .gs-sig-label { font-style: italic; margin-bottom: 4px; }
-.gs-sig-name { font-weight: bold; text-align: center; margin-top: 20px; }
+.gs-sig-name { font-weight: bold; text-align: center; margin-top: 8px; }
 .gs-sig-title { text-align: center; font-style: italic; font-size: 8.5px; }
 .gs-footer { border-top: 1px solid #333; margin-top: 20px; padding-top: 4px;
              display: flex; justify-content: space-between; font-size: 8px; color: #333; }
@@ -211,6 +217,7 @@ echo $OUTPUT->header();
         <a href="index.php?courseid=<?php echo $courseid; ?>" class="btn btn-secondary btn-sm">← Back</a>
         <button onclick="window.print()" class="btn btn-primary btn-sm ml-2">🖨️ Print</button>
         <a href="export.php?courseid=<?php echo $courseid; ?>" class="btn btn-success btn-sm ml-2">⬇️ Download PDF</a>
+        <a href="course_settings.php?courseid=<?php echo $courseid; ?>" class="btn btn-secondary btn-sm ml-2">⚙ Settings</a>
     </div>
 </div>
 
@@ -266,25 +273,26 @@ echo $OUTPUT->header();
     <table class="gs-table">
         <thead>
             <tr>
-                <th style="width:4%">NO.</th>
-                <th style="width:28%">NAME OF STUDENTS</th>
-                <th style="width:12%">STUDENT NO.</th>
-                <th style="width:13%">MIDTERM</th>
-				<th style="width:13%">FINALS</th>
-                <th style="width:11%">AVERAGE</th>
-                <th style="width:10%">REMARKS</th>
+                <th style="width:5.56%">NO.</th>
+                <th style="width:33.33%">NAME OF STUDENTS</th>
+                <th style="width:15.56%">STUDENT NO.</th>
+                <th style="width:11.11%">MIDTERM</th>
+				<th style="width:11.11%">FINALS</th>
+                <th style="width:11.11%">AVERAGE</th>
+                <th style="width:12.22%">REMARKS</th>
             </tr>
         </thead>
         <tbody>
             <?php foreach ($rows as $i => $row): ?>
-            <tr class="<?php echo $row['remarks'] === 'Failed' ? 'failed-row' : ''; ?>">
-                <td><?php echo $i + 1; ?></td>
+            <?php $isfailed = ($row['remarks'] === 'Failed'); ?>
+            <tr>
+                <td class="<?php echo $isfailed ? 'failed-cell' : ''; ?>"><?php echo $i + 1; ?></td>
                 <td class="name-col"><?php echo htmlspecialchars($row['name']); ?></td>
                 <td><?php echo htmlspecialchars($row['idnumber']); ?></td>
                 <td><?php echo $row['midterm']; ?></td>
 				<td><?php echo $row['finals']; ?></td>
                 <td><?php echo $row['average']; ?></td>
-                <td><?php echo $row['remarks']; ?></td>
+                <td class="<?php echo $isfailed ? 'failed-cell' : ''; ?>"><?php echo $row['remarks']; ?></td>
             </tr>
             <?php endforeach; ?>
             <tr>

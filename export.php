@@ -1,4 +1,5 @@
 <?php
+ob_start();
 require_once('../../config.php');
 require_once($CFG->libdir.'/gradelib.php');
 require_once($CFG->libdir.'/grade/grade_item.php');
@@ -151,36 +152,78 @@ foreach ($students as $student) {
 $total    = $passcount + $failcount;
 $passrate = $total > 0 ? round(($passcount / $total) * 100, 1) : 0;
 
+class gradesheet_pdf extends pdf {
+    public $report = [];
+
+    public function Header() {
+        global $CFG;
+
+        $pageW = $this->getPageWidth();
+        $topY = 10;
+        $essulogo = $CFG->dirroot . '/local/gradesheet/pix/essu-header.png';
+        $bagonglogo = $CFG->dirroot . '/local/gradesheet/pix/bagong-pilipinas.png';
+
+        if (file_exists($essulogo)) {
+            $this->Image($essulogo, 12, $topY, 55, 0);
+        }
+        if (file_exists($bagonglogo)) {
+            $this->Image($bagonglogo, $pageW - 37, $topY, 25, 0);
+        }
+    }
+
+    public function Footer() {
+        $this->SetY(-24);
+        $this->SetFont('helvetica', '', 7);
+        $this->Line(15, $this->GetY(), $this->getPageWidth() - 15, $this->GetY());
+        $this->Ln(1);
+        $this->Cell(0, 4, 'ESSU-ACAD-712.b  |  Version 5', 0, 0, 'L');
+        $this->Cell(0, 4, 'Page ' . $this->getAliasNumPage() . ' of ' . $this->getAliasNbPages(), 0, 1, 'R');
+        $this->Cell(0, 4, 'Effectivity Date: March 15, 2024', 0, 0, 'L');
+    }
+}
+
 // ── GENERATE PDF ──────────────────────────────────────────────────────────────
-$pdf = new pdf('P', 'mm', 'LETTER', true, 'UTF-8', false);
+$pdf = new gradesheet_pdf('P', 'mm', 'A4', true, 'UTF-8', false);
 $pdf->SetCreator('ESSU Grade Sheet Plugin');
 $pdf->SetTitle('Report of Grades - ' . $coursename);
-$pdf->setPrintHeader(false);
-$pdf->setPrintFooter(false);
-$pdf->SetMargins(15, 15, 15);
-$pdf->SetAutoPageBreak(true, 20);
+$pdf->setPrintHeader(true);
+$pdf->setPrintFooter(true);
+$pdf->SetMargins(15, 42, 15);
+$pdf->SetHeaderMargin(8);
+$pdf->SetFooterMargin(24);
+$pdf->SetAutoPageBreak(true, 28);
+$pdf->report = [
+    'semester'      => $semester,
+    'schoolyear'    => $schoolyear,
+    'coursenumber'  => $coursenumber,
+    'descriptive'   => $descriptive,
+    'courseandyear' => $courseandyear,
+    'schedule'      => $schedule,
+    'units'         => $units,
+    'legend'        => [
+        ['100',   '1.0',     'Outstanding'],
+        ['94-90', '1.1-1.5', 'Excellent'],
+        ['89-85', '1.6-2.0', 'Very Good'],
+        ['84-80', '2.1-2.5', 'Good'],
+        ['79-75', '2.6-3.0', 'Fair'],
+        ['74-70', '3.1-3.5', 'Conditional'],
+        ['69-55', '3.6-5.0', 'Failed'],
+        ['INC',   'INC',     'Incomplete'],
+        ['Dr',    'Dr',      'Dropped'],
+        ['WP',    'WP',      'Withdrawn w/ permission'],
+        ['IP',    'IP',      'In Progress'],
+    ],
+];
 $pdf->AddPage();
 
-$pageW = $pdf->getPageWidth();
-$topY  = 10;
-
-// Logos
-$essulogo   = $CFG->dirroot . '/local/gradesheet/pix/essu-header.png';
-$bagonglogo = $CFG->dirroot . '/local/gradesheet/pix/bagong-pilipinas.png';
-if (file_exists($essulogo))   $pdf->Image($essulogo,   12,             $topY, 55, 0);
-if (file_exists($bagonglogo)) $pdf->Image($bagonglogo, $pageW - 37,    $topY, 25, 0);
-
-// Title below logos
-$pdf->SetY($topY + 33);
+$pdf->SetY(42);
 $pdf->SetFont('helvetica', 'B', 16);
 $pdf->Cell(0, 8, 'REPORT OF GRADES', 0, 1, 'C');
 $pdf->SetFont('helvetica', '', 10);
 $pdf->Cell(0, 6, $semester . '  SY ' . $schoolyear, 0, 1, 'C');
 $pdf->Ln(5);
 
-// Course info + legend
 $infoY = $pdf->GetY();
-
 $pdf->SetFont('helvetica', '', 9);
 $pdf->SetX(15); $pdf->Cell(40, 5, 'Subject and Course No. :', 0, 0);
 $pdf->SetFont('helvetica', 'B', 9); $pdf->Cell(0, 5, $coursenumber, 0, 1);
@@ -199,7 +242,6 @@ $pdf->Cell(0, 5, $schedule, 0, 1);
 $pdf->SetX(15); $pdf->Cell(40, 5, 'Number of Units :', 0, 0);
 $pdf->Cell(0, 5, $units, 0, 1);
 
-// Rating legend
 $legendX = 120;
 $pdf->SetXY($legendX, $infoY);
 $pdf->SetFont('helvetica', 'B', 7);
@@ -207,21 +249,8 @@ $pdf->Cell(25, 4, 'Actual Rating',     1, 0, 'C');
 $pdf->Cell(25, 4, 'Equivalent Rating', 1, 0, 'C');
 $pdf->Cell(30, 4, 'Adjectival Rating', 1, 1, 'C');
 
-$legend = [
-    ['100',   '1.0',     'Outstanding'],
-    ['94-90', '1.1-1.5', 'Excellent'],
-    ['89-85', '1.6-2.0', 'Very Good'],
-    ['84-80', '2.1-2.5', 'Good'],
-    ['79-75', '2.6-3.0', 'Fair'],
-    ['74-70', '3.1-3.5', 'Conditional'],
-    ['69-55', '3.6-5.0', 'Failed'],
-    ['INC',   'INC',     'Incomplete'],
-    ['Dr',    'Dr',      'Dropped'],
-    ['WP',    'WP',      'Withdrawn w/ permission'],
-    ['IP',    'IP',      'In Progress'],
-];
 $pdf->SetFont('helvetica', '', 7);
-foreach ($legend as $lrow) {
+foreach ($pdf->report['legend'] as $lrow) {
     $pdf->SetX($legendX);
     $pdf->Cell(25, 3.5, $lrow[0], 1, 0, 'C');
     $pdf->Cell(25, 3.5, $lrow[1], 1, 0, 'C');
@@ -230,12 +259,12 @@ foreach ($legend as $lrow) {
 
 $pdf->Ln(4);
 
-// ── TABLE HEADER ──────────────────────────────────────────────────────────────
+// Default Midterm/Finals
+$col = [10, 60, 28, 20, 20, 20, 22];
+
+$headers = ['NO.', 'NAME OF STUDENTS', 'STUDENT NO.', 'MIDTERM', 'FINALS', 'AVERAGE', 'REMARKS'];
 $pdf->SetFont('helvetica', 'B', 8);
 $pdf->SetTextColor(0, 0, 0);
-// Default Midterm/Finals
-$col     = [10, 60, 28, 20, 20, 20, 22];
-$headers = ['NO.', 'NAME OF STUDENTS', 'STUDENT NO.', 'MIDTERM', 'FINALS', 'AVERAGE', 'REMARKS'];
 foreach ($headers as $i => $h) {
     $pdf->Cell($col[$i], 8, $h, 1, 0, 'C');
 }
@@ -243,8 +272,19 @@ $pdf->Ln();
 
 // ── DATA ROWS ─────────────────────────────────────────────────────────────────
 $pdf->SetFont('helvetica', '', 8);
+$signatureblockheight = 58;
+$tailheight = 6 + 2 + $signatureblockheight;
+$rowcount = count($rows);
 
 foreach ($rows as $i => $row) {
+    $islastrow = ($i === $rowcount - 1);
+    if ($islastrow) {
+        $remaining = $pdf->getPageHeight() - $pdf->GetY() - 28;
+        if ($remaining < (6 + $tailheight)) {
+            $pdf->AddPage();
+        }
+    }
+
     $fill = ($i % 2 === 0);
     $pdf->SetFillColor(245, 245, 245);
 
@@ -271,46 +311,40 @@ $pdf->Cell($col[1], 6, '***Nothing Follows***', 1, 0, 'L');
 foreach ([2,3,4,5,6] as $ci) $pdf->Cell($col[$ci], 6, '', 1, 0, 'C');
 $pdf->Ln();
 
-$pdf->Ln(6);
+$pdf->Ln(4);
 
 // ── SIGNATURES ────────────────────────────────────────────────────────────────
 $pdf->SetFont('helvetica', 'I', 9);
-$pdf->Cell(90, 5, 'Certified True & Correct:', 0, 0);
-$pdf->Cell(0,  5, 'Checked:', 0, 1);
-$pdf->Ln(12);
-
-$pdf->SetFont('helvetica', 'B', 9);
-$pdf->Cell(90, 5, $instructor, 0, 0, 'C');
-$pdf->Cell(0,  5, $depthead,   0, 1, 'C');
-
-$pdf->SetFont('helvetica', 'I', 8);
-$pdf->Cell(90, 4, 'Instructor',      0, 0, 'C');
-$pdf->Cell(0,  4, 'Department Head', 0, 1, 'C');
-
+$pdf->Cell(90, 3, 'Certified True & Correct:', 0, 0);
+$pdf->Cell(0,  3, 'Checked:', 0, 1);
 $pdf->Ln(8);
 
-$pdf->SetFont('helvetica', 'I', 9);
-$pdf->Cell(90, 5, 'Received:', 0, 0);
-$pdf->Cell(0,  5, 'Approved:', 0, 1);
-$pdf->Ln(12);
-
 $pdf->SetFont('helvetica', 'B', 9);
-$pdf->Cell(90, 5, $registrar,   0, 0, 'C');
-$pdf->Cell(0,  5, $collegedean, 0, 1, 'C');
+$pdf->Cell(90, 3, $instructor, 0, 0, 'C');
+$pdf->Cell(0,  3, $depthead,   0, 1, 'C');
 
 $pdf->SetFont('helvetica', 'I', 8);
-$pdf->Cell(90, 4, 'Registrar',    0, 0, 'C');
-$pdf->Cell(0,  4, 'College Dean', 0, 1, 'C');
+$pdf->Cell(90, 3, 'Instructor',      0, 0, 'C');
+$pdf->Cell(0,  3, 'Department Head', 0, 1, 'C');
 
-// ── FOOTER ────────────────────────────────────────────────────────────────────
-$pdf->SetY(-18);
-$pdf->SetFont('helvetica', '', 7);
-$pdf->Line(15, $pdf->GetY(), $pageW - 15, $pdf->GetY());
-$pdf->Ln(1);
-$pdf->Cell(0, 4, 'ESSU-ACAD-712.b  |  Version 5', 0, 0, 'L');
-$pdf->Cell(0, 4, 'Page 1 of 1', 0, 1, 'R');
-$pdf->Cell(0, 4, 'Effectivity Date: March 15, 2024', 0, 0, 'L');
+$pdf->Ln(5);
+
+$pdf->SetFont('helvetica', 'I', 9);
+$pdf->Cell(90, 3, 'Received:', 0, 0);
+$pdf->Cell(0,  3, 'Approved:', 0, 1);
+$pdf->Ln(8);
+
+$pdf->SetFont('helvetica', 'B', 9);
+$pdf->Cell(90, 3, $registrar,   0, 0, 'C');
+$pdf->Cell(0,  3, $collegedean, 0, 1, 'C');
+
+$pdf->SetFont('helvetica', 'I', 8);
+$pdf->Cell(90, 3, 'Registrar',    0, 0, 'C');
+$pdf->Cell(0,  3, 'College Dean', 0, 1, 'C');
 
 $filename = 'ReportOfGrades_' . str_replace(' ', '_', $coursename) . '_' . date('Ymd') . '.pdf';
+while (ob_get_level()) {
+    ob_end_clean();
+}
 $pdf->Output($filename, 'D');
 exit;

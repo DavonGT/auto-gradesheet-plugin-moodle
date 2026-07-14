@@ -12,6 +12,7 @@ function local_gradesheet_extend_navigation_course($navigation, $course, $contex
             'local_gradesheet',
             new pix_icon('i/grades', '')
         );
+        $node->showinflatnavigation = true;
         $navigation->add_node($node);
     }
 }
