@@ -217,6 +217,7 @@ echo $OUTPUT->header();
         <a href="index.php?courseid=<?php echo $courseid; ?>" class="btn btn-secondary btn-sm">← Back</a>
         <button onclick="window.print()" class="btn btn-primary btn-sm ml-2">🖨️ Print</button>
         <a href="export.php?courseid=<?php echo $courseid; ?>" class="btn btn-success btn-sm ml-2">⬇️ Download PDF</a>
+        <a href="course_settings.php?courseid=<?php echo $courseid; ?>" class="btn btn-secondary btn-sm ml-2">⚙ Settings</a>
     </div>
 </div>
 
