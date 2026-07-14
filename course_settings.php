@@ -72,6 +72,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     }
 
+    // Update an existing category
+    if ($action === 'updatecategory') {
+        $catid  = required_param('catid', PARAM_INT);
+        $name   = required_param('catname', PARAM_TEXT);
+        $weight = required_param('catweight', PARAM_FLOAT);
+
+        $category = $DB->get_record('local_gradesheet_categories', ['id' => $catid, 'courseid' => $courseid]);
+        if ($category && !empty($name) && $weight >= 0) {
+            $category->name = $name;
+            $category->weight = $weight;
+            $DB->update_record('local_gradesheet_categories', $category);
+            redirect(
+                new moodle_url('/local/gradesheet/course_settings.php', ['courseid' => $courseid], 'grade-categories'),
+                "Category '{$name}' updated!",
+                null,
+                \core\output\notification::NOTIFY_SUCCESS
+            );
+        }
+    }
+
     // Delete a category
     if ($action === 'deletecategory') {
         $catid = required_param('catid', PARAM_INT);
@@ -113,6 +133,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 // ── LOAD DATA ─────────────────────────────────────────────────────────────────
 $config     = $DB->get_record('local_gradesheet_config', ['courseid' => $courseid]);
 $categories = $DB->get_records('local_gradesheet_categories', ['courseid' => $courseid], 'sortorder ASC');
+$editcatid = optional_param('editcatid', 0, PARAM_INT);
+$editcategory = $editcatid ? $DB->get_record('local_gradesheet_categories', ['id' => $editcatid, 'courseid' => $courseid]) : null;
 
 $totalweight = 0;
 foreach ($categories as $cat) $totalweight += $cat->weight;
@@ -214,7 +236,7 @@ echo $OUTPUT->header();
     </div>
 
     <!-- SECTION 2: Grade Categories -->
-    <div class="card mb-4">
+    <div class="card mb-4" id="grade-categories">
         <div class="card-header bg-dark text-white">
             <strong>📊 Grade Categories & Weights</strong>
         </div>
@@ -237,10 +259,33 @@ echo $OUTPUT->header();
                 </thead>
                 <tbody>
                     <?php foreach ($categories as $cat): ?>
+                    <?php if ($editcategory && (int) $editcategory->id === (int) $cat->id): ?>
+                    <tr class="table-warning">
+                        <td>
+                            <form method="post" id="editcategoryform<?php echo $cat->id; ?>">
+                                <input type="hidden" name="action" value="updatecategory">
+                                <input type="hidden" name="catid" value="<?php echo $cat->id; ?>">
+                                <input type="text" name="catname" class="form-control form-control-sm"
+                                       value="<?php echo s($cat->name); ?>">
+                            </form>
+                        </td>
+                        <td>
+                            <input type="number" name="catweight" class="form-control form-control-sm"
+                                   form="editcategoryform<?php echo $cat->id; ?>"
+                                   value="<?php echo s($cat->weight); ?>" min="0" max="100" step="0.01">
+                        </td>
+                        <td>
+                            <button type="submit" class="btn btn-primary btn-sm" form="editcategoryform<?php echo $cat->id; ?>">Save</button>
+                            <a href="course_settings.php?courseid=<?php echo $courseid; ?>#grade-categories" class="btn btn-secondary btn-sm">Cancel</a>
+                        </td>
+                    </tr>
+                    <?php else: ?>
                     <tr>
                         <td><strong><?php echo s($cat->name); ?></strong></td>
                         <td><?php echo $cat->weight; ?>%</td>
                         <td>
+                            <a href="course_settings.php?courseid=<?php echo $courseid; ?>&editcatid=<?php echo $cat->id; ?>#grade-categories"
+                               class="btn btn-warning btn-sm">Edit</a>
                             <form method="post" style="display:inline">
                                 <input type="hidden" name="action" value="deletecategory">
                                 <input type="hidden" name="catid" value="<?php echo $cat->id; ?>">
@@ -249,6 +294,7 @@ echo $OUTPUT->header();
                             </form>
                         </td>
                     </tr>
+                    <?php endif; ?>
                     <?php endforeach; ?>
                     <tr class="<?php echo abs($totalweight - 100) < 0.01 ? 'table-success' : 'table-danger'; ?>">
                         <td><strong>Total</strong></td>
