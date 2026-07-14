@@ -9,6 +9,12 @@ $courseid = required_param('courseid', PARAM_INT);
 $context  = context_course::instance($courseid);
 require_capability('local/gradesheet:manage', $context);
 
+$PAGE->set_url('/local/gradesheet/preview.php', ['courseid' => $courseid]);
+$PAGE->set_context($context);
+$PAGE->set_title(get_string('pluginname', 'local_gradesheet'));
+$PAGE->set_heading(get_string('pluginname', 'local_gradesheet'));
+
+
 function get_remarks_prev($grade) {
     return ($grade >= 75) ? 'Passed' : 'Failed';
 }
