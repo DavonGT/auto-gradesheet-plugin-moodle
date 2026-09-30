@@ -14,16 +14,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && optional_param('action', '', PARAM_
     $studentid = required_param('studentid', PARAM_INT);
     $status    = optional_param('status', '', PARAM_ALPHA);
 
+    //first require the user to have the manage capability in the course context
     require_capability('local/gradesheet:manage', context_course::instance($scourseid));
     helper::set_student_status($scourseid, $studentid, $status);
 
     redirect(new moodle_url('/local/gradesheet/index.php', ['courseid' => $scourseid]));
 }
 
+//optional params
 $courseid = optional_param('courseid', 0, PARAM_INT);
 $groupid  = optional_param('group', 0, PARAM_INT);
 $context = null;
 
+//if there is a course selected set context and require login
 if ($courseid > 0) {
     $course_obj = get_course($courseid);
     require_login($course_obj);
@@ -31,24 +34,32 @@ if ($courseid > 0) {
     helper::ensure_course_defaults($courseid);
 }
 
+//set the url for the PAGE global, moodle requires this
 $urlparams = array_filter(['courseid' => $courseid, 'group' => $groupid]);
 $PAGE->set_url('/local/gradesheet/index.php', $urlparams);
 
+
+//set context for the page, if no course is selected use system context
 if ($context) {
     $PAGE->set_context($context);
 } else {
     $PAGE->set_context(context_system::instance());
 }
 
+//tell page the title and heading
 $PAGE->set_title(get_string('pluginname', 'local_gradesheet'));
 $PAGE->set_heading(get_string('pluginname', 'local_gradesheet'));
 
+//echo the header and start the page output
+//mandatory to have posts/get before displaying headers
 echo $OUTPUT->header();
 echo '<div class="local-gradesheet-page">';
 
 $isadmin = is_siteadmin();
 $admin_too_many = false;
 
+
+//if admin and has too many course dont display to prevent errors in memory
 if ($isadmin) {
     if ($DB->count_records('course') > 500) {
         $courses = [];
@@ -60,6 +71,7 @@ if ($isadmin) {
     $courses = enrol_get_my_courses();
 }
 
+//SITE the front page is not a real course so we remove it so dropdown only shows real courses
 global $SITE;
 if (isset($courses[$SITE->id])) {
     unset($courses[$SITE->id]);
@@ -71,6 +83,7 @@ if ($admin_too_many && $courseid > 0) {
 
 echo '<div class="container mt-4">';
 
+//the dropdown for selecting a course
 if ($admin_too_many && !$courseid) {
     echo \local_gradesheet\helper::render_alert("There are too many courses on this site to display in a dropdown. Please navigate to a specific course and click &quot;Grade Sheet&quot; in the course navigation.", "info");
 } else {
@@ -83,6 +96,7 @@ if ($admin_too_many && !$courseid) {
     foreach ($courses as $course) {
         if (!$course) continue;
         $selected = ($courseid == $course->id) ? 'selected' : '';
+        //we use s() to escape the course name for safe output in HTML
         $safename = s(format_string($course->fullname));
         echo "<option value='{$course->id}' {$selected}>{$safename}</option>";
     }
@@ -92,6 +106,7 @@ if ($admin_too_many && !$courseid) {
     echo '</form>';
 }
 
+//if selected a course
 if ($courseid) {
     $cfg        = helper::load_course_config($courseid);
     $coursename = $cfg['coursename'];
@@ -199,6 +214,7 @@ if ($courseid) {
         echo '</div>';
 
     } else {
+        //if student
         $course_obj = get_course($courseid);
         $groupmode = groups_get_course_groupmode($course_obj);
 
