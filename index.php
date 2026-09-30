@@ -489,24 +489,10 @@ if ($courseid) {
             $groupparam = ($groupid > 0) ? '&group=' . $groupid : '';
             ?>
             <!-- Gradesheet PDF Preview Modal (Single Source of Truth) -->
-            <div id="gradesheetPdfModal" class="gs-modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="gsModalTitle">
+            <div id="gradesheetPdfModal" class="gs-modal-backdrop" role="dialog" aria-modal="true" aria-label="Report of Grades PDF Preview">
                 <div class="gs-modal-dialog">
                     <div class="gs-modal-header">
-                        <div class="gs-modal-title" id="gsModalTitle">
-                            <span>Report of Grades — PDF Preview</span>
-                            <span class="badge badge-light text-dark ml-2" style="font-size:11px; font-weight:normal; opacity:0.9;">
-                                <?php echo $safecoursename; ?>
-                            </span>
-                        </div>
-                        <div class="gs-modal-actions">
-                            <button type="button" class="btn btn-primary btn-sm" id="btnModalPrintPdf" onclick="printGradesheetPdf()" disabled>
-                                Print
-                            </button>
-                            <button type="button" class="btn btn-success btn-sm" id="btnModalDownloadPdf" onclick="downloadGradesheetPdf()" disabled>
-                                Download PDF
-                            </button>
-                            <button type="button" class="gs-modal-close-btn" onclick="closeGradesheetPdfPreview()" title="Close (Esc)">&times;</button>
-                        </div>
+                        <button type="button" class="gs-modal-close-btn" onclick="closeGradesheetPdfPreview()" title="Close (Esc)" aria-label="Close">&times;</button>
                     </div>
                     <div class="gs-modal-body">
                         <div id="gsModalSpinner" class="gs-modal-spinner-wrap">

@@ -94,8 +94,6 @@ $groupparam = $groupid ? '&group=' . $groupid : '';
     </div>
     <div>
         <a href="index.php?courseid=<?php echo $courseid . $groupparam; ?>" class="btn btn-secondary btn-sm">← Back</a>
-        <button id="btnPreviewPrint" onclick="printLoadedPdf()" class="btn btn-primary btn-sm ml-2" disabled>Print</button>
-        <button id="btnPreviewDownload" onclick="downloadLoadedPdf()" class="btn btn-success btn-sm ml-2" disabled>Download PDF</button>
         <a href="course_settings.php?courseid=<?php echo $courseid; ?>" class="btn btn-secondary btn-sm ml-2">Settings</a>
     </div>
 </div>
