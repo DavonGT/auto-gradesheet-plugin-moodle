@@ -10,6 +10,7 @@ use local_gradesheet\gradesheet_service;
 
 $courseid = required_param('courseid', PARAM_INT);
 $groupid  = optional_param('group', 0, PARAM_INT);
+$action   = optional_param('action', 'download', PARAM_ALPHA);
 $course   = get_course($courseid);
 require_login($course);
 $context  = context_course::instance($courseid);
@@ -258,5 +259,10 @@ $filename = clean_filename('ReportOfGrades_' . str_replace(' ', '_', $coursename
 while (ob_get_level()) {
     ob_end_clean();
 }
-$pdf->Output($filename, 'D');
+if ($action === 'preview' || $action === 'inline') {
+    header('Access-Control-Expose-Headers: Content-Disposition');
+    $pdf->Output($filename, 'I');
+} else {
+    $pdf->Output($filename, 'D');
+}
 exit;

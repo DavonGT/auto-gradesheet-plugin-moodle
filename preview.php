@@ -67,19 +67,18 @@ echo $OUTPUT->footer();
     exit;
 }
 
+if (empty($rows)) {
+    echo $OUTPUT->header();
+    echo '<div class="container mt-4">';
+    echo '<div class="alert alert-warning" role="alert">Cannot preview PDF: No students are enrolled in this course.</div>';
+    echo '<a href="index.php?courseid=' . $courseid . '" class="btn btn-secondary">Back to Grade Sheet</a>';
+    echo '</div>';
+    echo $OUTPUT->footer();
+    exit;
+}
+
 $PAGE->set_title('Report of Grades — ' . $coursename);
 $PAGE->set_heading('Report of Grades Preview');
-
-// ── PAGINATION ──────────────────────────────────────────────────────────
-// Split students across multiple A4-sized "pages" instead of one giant
-// continuous sheet. Every page now carries its own full signature block,
-// so both constants can use the same, slightly smaller, row budget.
-// Tune these if rows overflow/underflow a printed page in your browser.
-$rowsperpage    = 20; // Max student rows per page (all pages now include signatures).
-
-$pages = empty($rows) ? [[]] : array_chunk($rows, $rowsperpage);
-
-$totalpages = count($pages);
 
 echo $OUTPUT->header();
 echo '<div class="gradesheet-preview-page">';
@@ -91,143 +90,146 @@ $groupparam = $groupid ? '&group=' . $groupid : '';
     <div>
         <strong>Report of Grades Preview</strong>
         <span class="text-muted ml-2">- <?php echo s(format_string($coursename)); ?></span>
-        <span class="text-muted ml-2">(<?php echo $totalpages; ?> page<?php echo $totalpages === 1 ? '' : 's'; ?>)</span>
+        <span class="badge badge-light text-dark ml-2" style="font-size:11px; font-weight:normal; opacity:0.9;">Single Source of Truth</span>
     </div>
     <div>
         <a href="index.php?courseid=<?php echo $courseid . $groupparam; ?>" class="btn btn-secondary btn-sm">← Back</a>
-        <button onclick="window.print()" class="btn btn-primary btn-sm ml-2">Print</button>
-        <a href="export.php?courseid=<?php echo $courseid . $groupparam; ?>" class="btn btn-success btn-sm ml-2">Download PDF</a>
+        <button id="btnPreviewPrint" onclick="printLoadedPdf()" class="btn btn-primary btn-sm ml-2" disabled>Print</button>
+        <button id="btnPreviewDownload" onclick="downloadLoadedPdf()" class="btn btn-success btn-sm ml-2" disabled>Download PDF</button>
         <a href="course_settings.php?courseid=<?php echo $courseid; ?>" class="btn btn-secondary btn-sm ml-2">Settings</a>
     </div>
 </div>
 
-<div class="gradesheet-pages">
+<div class="gradesheet-pdf-embed-wrapper">
+    <div id="gsPreviewSpinner" class="gs-modal-spinner-wrap">
+        <div class="gs-spinner"></div>
+        <div class="gs-modal-spinner-text">Generating official PDF grade sheet...</div>
+        <div class="small text-muted mt-1">Single source of truth: Loading official registrar-aligned document</div>
+    </div>
+    <div id="gsPreviewError" class="alert alert-danger gs-modal-error" role="alert">
+        <span id="gsPreviewErrorText">Failed to load PDF preview.</span>
+        <button type="button" class="btn btn-sm btn-outline-danger ml-3" onclick="loadPreviewPdf(true)">Retry</button>
+    </div>
+    <iframe id="gsPreviewIframe" class="gs-pdf-iframe" title="Report of Grades PDF Preview"></iframe>
+</div>
+
+<script>
+(function() {
+    var cachedPdfBlob = null;
+    var cachedPdfUrl = null;
+    var cachedPdfFilename = <?php echo json_encode('ReportOfGrades_' . str_replace(' ', '_', clean_filename($coursename)) . '_' . date('Ymd') . '.pdf'); ?>;
+    var isFetching = false;
+
+    var courseId = <?php echo (int)$courseid; ?>;
+    var groupId  = <?php echo (int)$groupid; ?>;
+
+    window.loadPreviewPdf = function(forceReload) {
+        if (isFetching) return;
+        if (cachedPdfBlob && !forceReload) return;
+
+        var spinner  = document.getElementById('gsPreviewSpinner');
+        var errBox   = document.getElementById('gsPreviewError');
+        var iframe   = document.getElementById('gsPreviewIframe');
+        var printBtn = document.getElementById('btnPreviewPrint');
+        var dlBtn    = document.getElementById('btnPreviewDownload');
+
+        if (spinner) spinner.style.display = 'flex';
+        if (errBox) errBox.style.display = 'none';
+        if (printBtn) printBtn.disabled = true;
+        if (dlBtn) dlBtn.disabled = true;
+
+        isFetching = true;
+
+        var exportUrl = 'export.php?courseid=' + courseId + (groupId ? '&group=' + groupId : '') + '&action=preview';
+
+        fetch(exportUrl, {
+            method: 'GET',
+            credentials: 'same-origin'
+        })
+        .then(function(response) {
+            if (!response.ok) {
+                throw new Error('HTTP error ' + response.status);
+            }
+            var cd = response.headers.get('Content-Disposition') || '';
+            var match = cd.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/);
+            if (match && match[1]) {
+                cachedPdfFilename = match[1].replace(/['"]/g, '').trim();
+            }
+            var contentType = response.headers.get('content-type') || '';
+            if (contentType.indexOf('application/pdf') === -1) {
+                throw new Error('Server returned non-PDF response. Please check course settings.');
+            }
+            return response.blob();
+        })
+        .then(function(blob) {
+            cachedPdfBlob = blob;
+            if (cachedPdfUrl) {
+                URL.revokeObjectURL(cachedPdfUrl);
+            }
+            cachedPdfUrl = URL.createObjectURL(blob);
+            if (iframe) {
+                iframe.src = cachedPdfUrl;
+            }
+            if (spinner) spinner.style.display = 'none';
+            if (printBtn) printBtn.disabled = false;
+            if (dlBtn) dlBtn.disabled = false;
+            isFetching = false;
+        })
+        .catch(function(err) {
+            isFetching = false;
+            if (spinner) spinner.style.display = 'none';
+            if (errBox) {
+                var errText = document.getElementById('gsPreviewErrorText');
+                if (errText) {
+                    errText.textContent = err.message || 'Failed to load PDF preview.';
+                }
+                errBox.style.display = 'block';
+            }
+        });
+    };
+
+    window.downloadLoadedPdf = function() {
+        if (!cachedPdfBlob) {
+            window.location.href = 'export.php?courseid=' + courseId + (groupId ? '&group=' + groupId : '');
+            return;
+        }
+        var tempUrl = URL.createObjectURL(cachedPdfBlob);
+        var a = document.createElement('a');
+        a.style.display = 'none';
+        a.href = tempUrl;
+        a.download = cachedPdfFilename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(function() {
+            URL.revokeObjectURL(tempUrl);
+        }, 2000);
+    };
+
+    window.printLoadedPdf = function() {
+        var iframe = document.getElementById('gsPreviewIframe');
+        if (iframe && iframe.contentWindow) {
+            try {
+                iframe.contentWindow.focus();
+                iframe.contentWindow.print();
+                return;
+            } catch (e) {
+                console.warn('Direct iframe print encountered an issue, trying window fallback', e);
+            }
+        }
+        if (cachedPdfUrl) {
+            var printWin = window.open(cachedPdfUrl, '_blank');
+            if (printWin) {
+                printWin.focus();
+            }
+        }
+    };
+
+    // Auto-load PDF preview on page ready
+    loadPreviewPdf(false);
+})();
+</script>
+
 <?php
-$rownum = 1;
-foreach ($pages as $pageindex => $pagerows):
-    $islastpage = ($pageindex === $totalpages - 1);
-?>
-<div class="gradesheet-page">
-    <div class="gs-page-label">Page <?php echo $pageindex + 1; ?> of <?php echo $totalpages; ?></div>
-
-    <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:10px; width:100%;">
-        <img src="<?php echo $CFG->wwwroot; ?>/local/gradesheet/pix/essu-header.png" style="width:160px; height:auto;">
-        <div style="text-align:center; align-self:center;">
-            <div style="font-size:18px; font-weight:bold; letter-spacing:2px;">REPORT OF GRADES</div>
-            <div style="font-size:11px; color:#333; margin-top:4px;">
-                <?php echo s($semester); ?> &nbsp;&nbsp; SY <?php echo s($schoolyear); ?>
-            </div>
-        </div>
-        <img src="<?php echo $CFG->wwwroot; ?>/local/gradesheet/pix/bagong-pilipinas.png" style="width:80px; height:auto;">
-    </div>
-
-    <div class="gs-info-legend">
-        <div class="gs-info">
-            <table>
-                <tr><td>Subject and Course No. :</td><td><strong><?php echo htmlspecialchars($coursenumber); ?></strong></td></tr>
-                <tr><td>Descriptive Title :</td><td><strong><?php echo htmlspecialchars($descriptive); ?></strong></td></tr>
-                <tr><td>Course and Year :</td><td><strong><?php echo htmlspecialchars($courseandyear); ?></strong></td></tr>
-                <tr><td>Schedule of Classes :</td><td><strong><?php echo htmlspecialchars($schedule); ?></strong></td></tr>
-                <tr><td>Number of Units :</td><td><strong><?php echo htmlspecialchars($units); ?></strong></td></tr>
-            </table>
-        </div>
-        <div class="gs-legend">
-            <?php
-                $is_custom = helper::get_custom_transmute_rows($courseid) ? true : false;
-            ?>
-            <table>
-                <thead>
-                    <tr>
-                        <th>Actual<br>Rating</th>
-                        <?php if (!$is_custom): ?><th>Equivalent<br>Rating</th><?php endif; ?>
-                        <th>Adjectival<br>Rating</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <?php foreach (helper::get_rating_legend($courseid) as $lrow): ?>
-                    <tr>
-                        <td><?php echo s($lrow[0]); ?></td>
-                        <?php if (!$is_custom): ?><td><?php echo s($lrow[1]); ?></td><?php endif; ?>
-                        <td><?php echo s($lrow[2]); ?></td>
-                    </tr>
-                    <?php endforeach; ?>
-                </tbody>
-            </table>
-        </div>
-    </div>
-
-    <table class="gs-table">
-        <thead>
-            <tr>
-                <th style="width:5.56%">NO.</th>
-                <th style="width:33.33%">NAME OF STUDENTS</th>
-                <th style="width:15.56%">STUDENT NO.</th>
-                <th style="width:11.11%">MIDTERM</th>
-				<th style="width:11.11%">FINALS</th>
-                <th style="width:11.11%">AVERAGE</th>
-                <th style="width:12.22%">REMARKS</th>
-            </tr>
-        </thead>
-        <tbody>
-            <?php foreach ($pagerows as $row): ?>
-            <?php $isfailed = ($row['remarks'] === 'Failed'); ?>
-            <tr>
-                <td class="<?php echo $isfailed ? 'failed-cell' : ''; ?>"><?php echo $rownum++; ?></td>
-                <td class="name-col"><?php echo htmlspecialchars($row['name']); ?></td>
-                <td><?php echo htmlspecialchars($row['idnumber']); ?></td>
-                <td><?php echo s($row['midterm']); ?></td>
-				<td><?php echo s($row['finals']); ?></td>
-                <td><?php echo s($row['average']); ?></td>
-                <td class="<?php echo $isfailed ? 'failed-cell' : ''; ?>"><?php echo s($row['remarks']); ?></td>
-            </tr>
-            <?php endforeach; ?>
-            <?php if ($islastpage): ?>
-            <tr>
-                <td></td>
-                <td class="name-col"><em>***Nothing Follows***</em></td>
-                <td></td>
-                <td></td><td></td>
-                <td></td><td></td>
-            </tr>
-            <?php endif; ?>
-        </tbody>
-    </table>
-
-    <div class="gs-signatures">
-        <div class="gs-sig-row">
-            <div class="gs-sig-block">
-                <div class="gs-sig-label">Certified True &amp; Correct:</div>
-                <div class="gs-sig-name"><?php echo htmlspecialchars($instructor); ?></div>
-                <div class="gs-sig-title">Instructor</div>
-            </div>
-            <div class="gs-sig-block">
-                <div class="gs-sig-label">Checked:</div>
-                <div class="gs-sig-name"><?php echo htmlspecialchars($depthead); ?></div>
-                <div class="gs-sig-title">Department Head</div>
-            </div>
-        </div>
-        <div class="gs-sig-row">
-            <div class="gs-sig-block">
-                <div class="gs-sig-label">Received:</div>
-                <div class="gs-sig-name"><?php echo htmlspecialchars($registrar); ?></div>
-                <div class="gs-sig-title">Registrar</div>
-            </div>
-            <div class="gs-sig-block">
-                <div class="gs-sig-label">Approved:</div>
-                <div class="gs-sig-name"><?php echo htmlspecialchars($collegedean); ?></div>
-                <div class="gs-sig-title">College Dean</div>
-            </div>
-        </div>
-    </div>
-
-    <div class="gs-footer">
-        <span>ESSU-ACAD-712.b &nbsp;|&nbsp; Version 5<br>Effectivity Date: March 15, 2024</span>
-        <span>Page <?php echo $pageindex + 1; ?> of <?php echo $totalpages; ?></span>
-    </div>
-
-</div>
-<?php endforeach; ?>
-</div>
-
-<?php echo '</div>';
+echo '</div>';
 echo $OUTPUT->footer(); ?>

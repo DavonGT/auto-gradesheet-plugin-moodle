@@ -270,7 +270,7 @@ if ($courseid) {
         if ($canmanage) {
             $groupparam = ($groupid > 0) ? '&group=' . $groupid : '';
             $btncls = $weightvalid['valid'] ? '' : ' disabled';
-            echo '<a href="preview.php?courseid='      . $courseid . $groupparam . '" class="btn btn-primary mb-3' . $btncls . '">Preview & Print</a> ';
+            echo '<a href="preview.php?courseid='      . $courseid . $groupparam . '" id="btnGradesheetPreview" onclick="openGradesheetPdfPreview(event)" class="btn btn-primary mb-3' . $btncls . '">Preview & Print</a> ';
             echo '<a href="export.php?courseid='       . $courseid . $groupparam . '" class="btn btn-success mb-3' . $btncls . '">Download PDF</a> ';
             echo '<a href="export_excel.php?courseid=' . $courseid . $groupparam . '" class="btn btn-warning mb-3' . $btncls . '">Download Excel</a> ';
             echo '<a href="course_settings.php?courseid=' . $courseid . '" class="btn btn-secondary mb-3">Settings</a>';
@@ -484,6 +484,201 @@ if ($courseid) {
             };
         })();
         </script>';
+
+        if ($canmanage) {
+            $groupparam = ($groupid > 0) ? '&group=' . $groupid : '';
+            ?>
+            <!-- Gradesheet PDF Preview Modal (Single Source of Truth) -->
+            <div id="gradesheetPdfModal" class="gs-modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="gsModalTitle">
+                <div class="gs-modal-dialog">
+                    <div class="gs-modal-header">
+                        <div class="gs-modal-title" id="gsModalTitle">
+                            <span>Report of Grades — PDF Preview</span>
+                            <span class="badge badge-light text-dark ml-2" style="font-size:11px; font-weight:normal; opacity:0.9;">
+                                <?php echo $safecoursename; ?>
+                            </span>
+                        </div>
+                        <div class="gs-modal-actions">
+                            <button type="button" class="btn btn-primary btn-sm" id="btnModalPrintPdf" onclick="printGradesheetPdf()" disabled>
+                                Print
+                            </button>
+                            <button type="button" class="btn btn-success btn-sm" id="btnModalDownloadPdf" onclick="downloadGradesheetPdf()" disabled>
+                                Download PDF
+                            </button>
+                            <button type="button" class="gs-modal-close-btn" onclick="closeGradesheetPdfPreview()" title="Close (Esc)">&times;</button>
+                        </div>
+                    </div>
+                    <div class="gs-modal-body">
+                        <div id="gsModalSpinner" class="gs-modal-spinner-wrap">
+                            <div class="gs-spinner"></div>
+                            <div class="gs-modal-spinner-text">Generating official PDF grade sheet...</div>
+                            <div class="small text-muted mt-1">Single source of truth: Loading official registrar-aligned document</div>
+                        </div>
+                        <div id="gsModalError" class="alert alert-danger gs-modal-error" role="alert">
+                            <span id="gsModalErrorText">Failed to load PDF preview.</span>
+                            <button type="button" class="btn btn-sm btn-outline-danger ml-3" onclick="loadGradesheetPdf(true)">Retry</button>
+                        </div>
+                        <iframe id="gsPdfPreviewIframe" class="gs-pdf-iframe" title="Gradesheet PDF Preview"></iframe>
+                    </div>
+                </div>
+            </div>
+
+            <script>
+            (function() {
+                var cachedPdfBlob = null;
+                var cachedPdfUrl = null;
+                var cachedPdfFilename = <?php echo json_encode('ReportOfGrades_' . str_replace(' ', '_', clean_filename($coursename)) . '_' . date('Ymd') . '.pdf'); ?>;
+                var isFetching = false;
+
+                var courseId = <?php echo (int)$courseid; ?>;
+                var groupId  = <?php echo (int)$groupid; ?>;
+
+                window.openGradesheetPdfPreview = function(event) {
+                    if (event) {
+                        event.preventDefault();
+                    }
+                    var btn = document.getElementById('btnGradesheetPreview');
+                    if (btn && btn.classList.contains('disabled')) {
+                        return;
+                    }
+
+                    var modal = document.getElementById('gradesheetPdfModal');
+                    if (!modal) return;
+                    modal.classList.add('gs-show');
+                    document.body.style.overflow = 'hidden';
+
+                    if (!cachedPdfBlob) {
+                        loadGradesheetPdf(false);
+                    }
+                };
+
+                window.closeGradesheetPdfPreview = function() {
+                    var modal = document.getElementById('gradesheetPdfModal');
+                    if (!modal) return;
+                    modal.classList.remove('gs-show');
+                    document.body.style.overflow = '';
+                };
+
+                document.addEventListener('keydown', function(e) {
+                    if (e.key === 'Escape') {
+                        closeGradesheetPdfPreview();
+                    }
+                });
+
+                var modalBackdrop = document.getElementById('gradesheetPdfModal');
+                if (modalBackdrop) {
+                    modalBackdrop.addEventListener('click', function(e) {
+                        if (e.target === modalBackdrop) {
+                            closeGradesheetPdfPreview();
+                        }
+                    });
+                }
+
+                window.loadGradesheetPdf = function(forceReload) {
+                    if (isFetching) return;
+                    if (cachedPdfBlob && !forceReload) return;
+
+                    var spinner = document.getElementById('gsModalSpinner');
+                    var errBox  = document.getElementById('gsModalError');
+                    var iframe  = document.getElementById('gsPdfPreviewIframe');
+                    var printBtn = document.getElementById('btnModalPrintPdf');
+                    var dlBtn    = document.getElementById('btnModalDownloadPdf');
+
+                    if (spinner) spinner.style.display = 'flex';
+                    if (errBox) errBox.style.display = 'none';
+                    if (printBtn) printBtn.disabled = true;
+                    if (dlBtn) dlBtn.disabled = true;
+
+                    isFetching = true;
+
+                    var exportUrl = 'export.php?courseid=' + courseId + (groupId ? '&group=' + groupId : '') + '&action=preview';
+
+                    fetch(exportUrl, {
+                        method: 'GET',
+                        credentials: 'same-origin'
+                    })
+                    .then(function(response) {
+                        if (!response.ok) {
+                            throw new Error('HTTP error ' + response.status);
+                        }
+                        var cd = response.headers.get('Content-Disposition') || '';
+                        var match = cd.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/);
+                        if (match && match[1]) {
+                            cachedPdfFilename = match[1].replace(/['"]/g, '').trim();
+                        }
+                        var contentType = response.headers.get('content-type') || '';
+                        if (contentType.indexOf('application/pdf') === -1) {
+                            throw new Error('Server returned unexpected content. Please verify course settings and student enrollment.');
+                        }
+                        return response.blob();
+                    })
+                    .then(function(blob) {
+                        cachedPdfBlob = blob;
+                        if (cachedPdfUrl) {
+                            URL.revokeObjectURL(cachedPdfUrl);
+                        }
+                        cachedPdfUrl = URL.createObjectURL(blob);
+                        if (iframe) {
+                            iframe.src = cachedPdfUrl;
+                        }
+                        if (spinner) spinner.style.display = 'none';
+                        if (printBtn) printBtn.disabled = false;
+                        if (dlBtn) dlBtn.disabled = false;
+                        isFetching = false;
+                    })
+                    .catch(function(err) {
+                        isFetching = false;
+                        if (spinner) spinner.style.display = 'none';
+                        if (errBox) {
+                            var errText = document.getElementById('gsModalErrorText');
+                            if (errText) {
+                                errText.textContent = err.message || 'Failed to load PDF preview.';
+                            }
+                            errBox.style.display = 'block';
+                        }
+                    });
+                };
+
+                window.downloadGradesheetPdf = function() {
+                    if (!cachedPdfBlob) {
+                        window.location.href = 'export.php?courseid=' + courseId + (groupId ? '&group=' + groupId : '');
+                        return;
+                    }
+                    var tempUrl = URL.createObjectURL(cachedPdfBlob);
+                    var a = document.createElement('a');
+                    a.style.display = 'none';
+                    a.href = tempUrl;
+                    a.download = cachedPdfFilename;
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    setTimeout(function() {
+                        URL.revokeObjectURL(tempUrl);
+                    }, 2000);
+                };
+
+                window.printGradesheetPdf = function() {
+                    var iframe = document.getElementById('gsPdfPreviewIframe');
+                    if (iframe && iframe.contentWindow) {
+                        try {
+                            iframe.contentWindow.focus();
+                            iframe.contentWindow.print();
+                            return;
+                        } catch (e) {
+                            console.warn('Direct iframe print encountered an issue, trying window fallback', e);
+                        }
+                    }
+                    if (cachedPdfUrl) {
+                        var printWin = window.open(cachedPdfUrl, '_blank');
+                        if (printWin) {
+                            printWin.focus();
+                        }
+                    }
+                };
+            })();
+            </script>
+            <?php
+        }
     }
 } else {
     echo '<hr>';
