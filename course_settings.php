@@ -385,35 +385,14 @@ echo '<div class="local-gradesheet-page">';
                     </tr>
                 </thead>
                 <tbody>
-                    <?php foreach ($categories as $cat): ?>
-                    <?php if ($editcategory && (int) $editcategory->id === (int) $cat->id): ?>
-                    <tr class="table-warning">
-                        <td>
-                            <form method="post" id="editcategoryform<?php echo $cat->id; ?>">
-                                <input type="hidden" name="action" value="updatecategory">
-                                <input type="hidden" name="sesskey" value="<?php echo sesskey(); ?>">
-                                <input type="hidden" name="catid" value="<?php echo $cat->id; ?>">
-                                <input type="text" name="catname" class="form-control form-control-sm" maxlength="100"
-                                       value="<?php echo s($cat->name); ?>">
-                            </form>
-                        </td>
-                        <td>
-                            <input type="number" name="catweight" class="form-control form-control-sm"
-                                   form="editcategoryform<?php echo $cat->id; ?>"
-                                   value="<?php echo s($cat->weight); ?>" min="0" max="100" step="0.01">
-                        </td>
-                        <td>
-                            <button type="submit" class="btn btn-primary btn-sm" form="editcategoryform<?php echo $cat->id; ?>">Save</button>
-                            <a href="course_settings.php?courseid=<?php echo $courseid; ?>#grade-categories" class="btn btn-secondary btn-sm">Cancel</a>
-                        </td>
-                    </tr>
-                    <?php else: ?>
-                    <tr>
+                    <?php foreach ($categories as $cat): 
+                        $is_editing = ($editcategory && (int) $editcategory->id === (int) $cat->id);
+                    ?>
+                    <tr id="cat-view-<?php echo $cat->id; ?>" class="cat-view-row" style="<?php echo $is_editing ? 'display:none;' : ''; ?>">
                         <td><strong><?php echo s($cat->name); ?></strong></td>
                         <td><?php echo $cat->weight; ?>%</td>
                         <td>
-                            <a href="course_settings.php?courseid=<?php echo $courseid; ?>&editcatid=<?php echo $cat->id; ?>#grade-categories"
-                               class="btn btn-warning btn-sm">Edit</a>
+                            <button type="button" class="btn btn-warning btn-sm" onclick="toggleEditCategory(<?php echo $cat->id; ?>, true)">Edit</button>
                             <?php if (count($categories) > 1): ?>
                             <form method="post" style="display:inline">
                                 <input type="hidden" name="action" value="deletecategory">
@@ -428,7 +407,26 @@ echo '<div class="local-gradesheet-page">';
                             <?php endif; ?>
                         </td>
                     </tr>
-                    <?php endif; ?>
+                    <tr id="cat-edit-<?php echo $cat->id; ?>" class="table-warning cat-edit-row" style="<?php echo $is_editing ? '' : 'display:none;'; ?>">
+                        <td>
+                            <form method="post" id="editcategoryform<?php echo $cat->id; ?>">
+                                <input type="hidden" name="action" value="updatecategory">
+                                <input type="hidden" name="sesskey" value="<?php echo sesskey(); ?>">
+                                <input type="hidden" name="catid" value="<?php echo $cat->id; ?>">
+                                <input type="text" name="catname" id="catname-<?php echo $cat->id; ?>" class="form-control form-control-sm" maxlength="100"
+                                       value="<?php echo s($cat->name); ?>" data-original="<?php echo s($cat->name); ?>" required>
+                            </form>
+                        </td>
+                        <td>
+                            <input type="number" name="catweight" id="catweight-<?php echo $cat->id; ?>" class="form-control form-control-sm"
+                                   form="editcategoryform<?php echo $cat->id; ?>"
+                                   value="<?php echo s($cat->weight); ?>" data-original="<?php echo s($cat->weight); ?>" min="0" max="100" step="0.01" required>
+                        </td>
+                        <td>
+                            <button type="submit" class="btn btn-primary btn-sm" form="editcategoryform<?php echo $cat->id; ?>">Save</button>
+                            <button type="button" class="btn btn-secondary btn-sm" onclick="toggleEditCategory(<?php echo $cat->id; ?>, false)">Cancel</button>
+                        </td>
+                    </tr>
                     <?php endforeach; ?>
                     <?php if ($weightvalid['valid']): ?>
                     <tr class="table-success">
@@ -593,50 +591,57 @@ echo '<div class="local-gradesheet-page">';
                 </thead>
                 <tbody>
                     <?php if ($usingcustomscale): ?>
-                        <?php foreach ($transmuterows as $row): ?>
-                        <?php if ($edittransmute && (int) $edittransmute->id === (int) $row->id): ?>
-                        <tr class="table-warning">
-                            <td>
-                                <form method="post" id="edittransmuteform<?php echo $row->id; ?>">
-                                    <input type="hidden" name="action" value="updatetransmute">
-                                    <input type="hidden" name="sesskey" value="<?php echo sesskey(); ?>">
-                                    <input type="hidden" name="tid" value="<?php echo $row->id; ?>">
-                                    <input type="number" step="0.01" name="tmin" class="form-control form-control-sm" value="<?php echo s($row->minscore); ?>">
-                                </form>
-                            </td>
-                            <td><input type="number" step="0.01" name="tmax" class="form-control form-control-sm" form="edittransmuteform<?php echo $row->id; ?>" value="<?php echo s($row->maxscore); ?>"></td>
-                            <td><input type="text" name="tdesc" class="form-control form-control-sm" maxlength="100" form="edittransmuteform<?php echo $row->id; ?>" value="<?php echo s($row->descriptor); ?>"></td>
-                            <td>
-                                <div class="form-check">
-                                    <input type="checkbox" class="form-check-input" name="tispassing" value="1"
-                                           form="edittransmuteform<?php echo $row->id; ?>"
-                                           <?php echo $row->ispassing ? 'checked' : ''; ?>>
-                                </div>
-                            </td>
-                            <td>
-                                <button type="submit" class="btn btn-primary btn-sm" form="edittransmuteform<?php echo $row->id; ?>">Save</button>
-                                <a href="course_settings.php?courseid=<?php echo $courseid; ?>#grading-scale" class="btn btn-secondary btn-sm">Cancel</a>
-                            </td>
-                        </tr>
-                        <?php else: ?>
-                        <tr>
+                        <?php foreach ($transmuterows as $row): 
+                            $is_editing_scale = ($edittransmute && (int) $edittransmute->id === (int) $row->id);
+                        ?>
+                        <tr id="scale-view-<?php echo $row->id; ?>" class="scale-view-row" style="<?php echo $is_editing_scale ? 'display:none;' : ''; ?>">
                             <td><?php echo s($row->minscore); ?></td>
                             <td><?php echo s($row->maxscore); ?></td>
                             <td><?php echo s($row->descriptor); ?></td>
                             <td><?php echo $row->ispassing ? '<span class="badge badge-success">Yes</span>' : '<span class="badge badge-secondary">No</span>'; ?></td>
                             <td>
-                                <?php echo \local_gradesheet\helper::render_table_actions(
-                                    "course_settings.php?courseid=" . $courseid . "&edittid=" . $row->id . "#grading-scale",
-                                    "deletetransmute",
-                                    sesskey(),
-                                    "Delete",
-                                    false,
-                                    '<input type="hidden" name="tid" value="' . $row->id . '">',
-                                    "Delete this grading bracket?"
-                                ); ?>
+                                <button type="button" class="btn btn-warning btn-sm me-1" onclick="toggleEditScale(<?php echo $row->id; ?>, true)">Edit</button>
+                                <form method="post" class="d-inline m-0" onsubmit="return confirm('Delete this grading bracket?');">
+                                    <input type="hidden" name="action" value="deletetransmute">
+                                    <input type="hidden" name="sesskey" value="<?php echo sesskey(); ?>">
+                                    <input type="hidden" name="tid" value="<?php echo $row->id; ?>">
+                                    <button type="submit" class="btn btn-danger btn-sm">Delete</button>
+                                </form>
                             </td>
                         </tr>
-                        <?php endif; ?>
+                        <tr id="scale-edit-<?php echo $row->id; ?>" class="table-warning scale-edit-row" style="<?php echo $is_editing_scale ? '' : 'display:none;'; ?>">
+                            <td>
+                                <form method="post" id="edittransmuteform<?php echo $row->id; ?>">
+                                    <input type="hidden" name="action" value="updatetransmute">
+                                    <input type="hidden" name="sesskey" value="<?php echo sesskey(); ?>">
+                                    <input type="hidden" name="tid" value="<?php echo $row->id; ?>">
+                                    <input type="number" step="0.01" name="tmin" id="scalemin-<?php echo $row->id; ?>" class="form-control form-control-sm"
+                                           value="<?php echo s($row->minscore); ?>" data-original="<?php echo s($row->minscore); ?>" required>
+                                </form>
+                            </td>
+                            <td>
+                                <input type="number" step="0.01" name="tmax" id="scalemax-<?php echo $row->id; ?>" class="form-control form-control-sm"
+                                       form="edittransmuteform<?php echo $row->id; ?>"
+                                       value="<?php echo s($row->maxscore); ?>" data-original="<?php echo s($row->maxscore); ?>" required>
+                            </td>
+                            <td>
+                                <input type="text" name="tdesc" id="scaledesc-<?php echo $row->id; ?>" class="form-control form-control-sm" maxlength="100"
+                                       form="edittransmuteform<?php echo $row->id; ?>"
+                                       value="<?php echo s($row->descriptor); ?>" data-original="<?php echo s($row->descriptor); ?>">
+                            </td>
+                            <td>
+                                <div class="form-check">
+                                    <input type="checkbox" class="form-check-input" name="tispassing" id="scalepass-<?php echo $row->id; ?>" value="1"
+                                           form="edittransmuteform<?php echo $row->id; ?>"
+                                           data-original="<?php echo $row->ispassing ? '1' : '0'; ?>"
+                                           <?php echo $row->ispassing ? 'checked' : ''; ?>>
+                                </div>
+                            </td>
+                            <td>
+                                <button type="submit" class="btn btn-primary btn-sm me-1" form="edittransmuteform<?php echo $row->id; ?>">Save</button>
+                                <button type="button" class="btn btn-secondary btn-sm" onclick="toggleEditScale(<?php echo $row->id; ?>, false)">Cancel</button>
+                            </td>
+                        </tr>
                         <?php endforeach; ?>
                     <?php else: ?>
                         <?php foreach ($displaylegend as $lrow): ?>
@@ -682,6 +687,71 @@ echo '<div class="local-gradesheet-page">';
         </div>
     </div>
 </div>
+
+<script>
+function toggleEditCategory(catId, showEdit) {
+    var viewRow = document.getElementById('cat-view-' + catId);
+    var editRow = document.getElementById('cat-edit-' + catId);
+    if (!viewRow || !editRow) return;
+
+    if (showEdit) {
+        viewRow.style.display = 'none';
+        editRow.style.display = '';
+        var input = document.getElementById('catname-' + catId);
+        if (input) {
+            input.focus();
+            input.select();
+        }
+    } else {
+        var nameInput = document.getElementById('catname-' + catId);
+        var weightInput = document.getElementById('catweight-' + catId);
+        if (nameInput && nameInput.dataset.original !== undefined) {
+            nameInput.value = nameInput.dataset.original;
+        }
+        if (weightInput && weightInput.dataset.original !== undefined) {
+            weightInput.value = weightInput.dataset.original;
+        }
+        editRow.style.display = 'none';
+        viewRow.style.display = '';
+    }
+}
+
+function toggleEditScale(tid, showEdit) {
+    var viewRow = document.getElementById('scale-view-' + tid);
+    var editRow = document.getElementById('scale-edit-' + tid);
+    if (!viewRow || !editRow) return;
+
+    if (showEdit) {
+        viewRow.style.display = 'none';
+        editRow.style.display = '';
+        var input = document.getElementById('scalemin-' + tid);
+        if (input) {
+            input.focus();
+            input.select();
+        }
+    } else {
+        var minInput = document.getElementById('scalemin-' + tid);
+        var maxInput = document.getElementById('scalemax-' + tid);
+        var descInput = document.getElementById('scaledesc-' + tid);
+        var passInput = document.getElementById('scalepass-' + tid);
+
+        if (minInput && minInput.dataset.original !== undefined) {
+            minInput.value = minInput.dataset.original;
+        }
+        if (maxInput && maxInput.dataset.original !== undefined) {
+            maxInput.value = maxInput.dataset.original;
+        }
+        if (descInput && descInput.dataset.original !== undefined) {
+            descInput.value = descInput.dataset.original;
+        }
+        if (passInput && passInput.dataset.original !== undefined) {
+            passInput.checked = (passInput.dataset.original === '1');
+        }
+        editRow.style.display = 'none';
+        viewRow.style.display = '';
+    }
+}
+</script>
 
 <?php echo '</div>';
 echo $OUTPUT->footer(); ?>
