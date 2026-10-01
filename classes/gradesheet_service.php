@@ -6,12 +6,30 @@ defined('MOODLE_INTERNAL') || die();
 class gradesheet_service {
 
     public static function compute_all_grades(int $courseid, int $groupid = 0): array {
-        global $DB;
+        global $DB, $USER;
 
         $cfg    = helper::load_course_config($courseid);
         $ctx    = \context_course::instance($courseid);
         $students = helper::get_non_teaching_students($ctx, $groupid);
         $statusmap = helper::get_status_map($courseid);
+
+        if ($groupid > 0) {
+            $group = $DB->get_record('groups', ['id' => $groupid]);
+            if ($group && !empty($group->name)) {
+                $cfg['courseandyear'] = $group->name;
+            }
+            if (!empty($ctx)) {
+                $groupteachers = get_enrolled_users($ctx, 'local/gradesheet:manage', $groupid, 'u.id, u.firstname, u.lastname');
+                if (!empty($groupteachers)) {
+                    if (isset($USER->id, $groupteachers[$USER->id])) {
+                        $cfg['instructor'] = strtoupper(trim(fullname($groupteachers[$USER->id])));
+                    } else if (count($groupteachers) === 1) {
+                        $gt = reset($groupteachers);
+                        $cfg['instructor'] = strtoupper(trim(fullname($gt)));
+                    }
+                }
+            }
+        }
 
         $categories = $DB->get_records('local_gradesheet_categories',
             ['courseid' => $courseid], 'sortorder ASC');

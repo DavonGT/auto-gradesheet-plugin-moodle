@@ -333,7 +333,14 @@ $sheet->getPageSetup()->setFitToPage(true);
 $sheet->getPageSetup()->setFitToWidth(1);
 $sheet->getPageSetup()->setFitToHeight(0);
 
-$filename = clean_filename('ReportOfGrades_' . str_replace(' ', '_', $coursename) . '_' . date('Ymd') . '.xlsx');
+$groupsuffix = '';
+if ($groupid > 0) {
+    $grp = $DB->get_record('groups', ['id' => $groupid]);
+    if ($grp && !empty($grp->name)) {
+        $groupsuffix = '_' . clean_filename($grp->name);
+    }
+}
+$filename = clean_filename('ReportOfGrades_' . str_replace(' ', '_', $coursename) . $groupsuffix . '_' . date('Ymd') . '.xlsx');
 
 header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
 header('Content-Disposition: attachment; filename="' . $filename . '"');

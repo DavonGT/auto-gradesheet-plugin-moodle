@@ -337,6 +337,9 @@ function get_enrolled_users(context_course $context, string $withcap = '', int $
 function is_siteadmin($userid): bool {
     return $userid == 1;
 }
+function fullname($user): string {
+    return ($user->firstname ?? '') . ' ' . ($user->lastname ?? '');
+}
 
 // Require target plugin classes
 require_once __DIR__ . '/../classes/helper.php';
@@ -633,8 +636,8 @@ echo "======================================================================\n";
 $ctx401 = new context_course(401);
 $course401 = (object)['id' => 401, 'fullname' => 'Sec Course', 'shortname' => 'SEC401'];
 $DB->insert_record('course', $course401);
-$DB->insert_record('groups', (object)['id' => 1, 'courseid' => 401]);
-$DB->insert_record('groups', (object)['id' => 2, 'courseid' => 401]);
+$DB->insert_record('groups', (object)['id' => 1, 'courseid' => 401, 'name' => 'BSCS 1A']);
+$DB->insert_record('groups', (object)['id' => 2, 'courseid' => 401, 'name' => 'BSCS 1B']);
 $MOCK_COURSE_GROUPMODE = SEPARATEGROUPS;
 
 $MOCK_GROUP_MEMBERS = ["1:50"];
@@ -647,6 +650,16 @@ $T->assert("User 50 is BLOCKED from unauthorized Group 2 (IDOR Prevention)", !he
 $USER->id = 1;
 $MOCK_CAPABILITIES["moodle/site:accessallgroups:1"] = true;
 $T->assert("Admin with accessallgroups has access to Group 2", helper::check_group_access($ctx401, 2));
+
+helper::ensure_course_defaults(401);
+$grp1_export = gradesheet_service::compute_all_grades(401, 1);
+$T->assertEqual("Group 1 auto-sets Course and Year to BSCS 1A", $grp1_export['courseandyear'], 'BSCS 1A');
+
+$grp2_export = gradesheet_service::compute_all_grades(401, 2);
+$T->assertEqual("Group 2 auto-sets Course and Year to BSCS 1B", $grp2_export['courseandyear'], 'BSCS 1B');
+
+$all_export = gradesheet_service::compute_all_grades(401, 0);
+$T->assertEqual("Course with group 0 uses default courseandyear", $all_export['courseandyear'], 'BSCS 1A');
 
 $ref_hook = new ReflectionMethod(hooks::class, 'get_distinct_options');
 $ref_hook->setAccessible(true);

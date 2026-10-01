@@ -115,7 +115,16 @@ $groupparam = $groupid ? '&group=' . $groupid : '';
 (function() {
     var cachedPdfBlob = null;
     var cachedPdfUrl = null;
-    var cachedPdfFilename = <?php echo json_encode('ReportOfGrades_' . str_replace(' ', '_', clean_filename($coursename)) . '_' . date('Ymd') . '.pdf'); ?>;
+    <?php
+        $groupsuffix = '';
+        if ($groupid > 0) {
+            $grp = $DB->get_record('groups', ['id' => $groupid]);
+            if ($grp && !empty($grp->name)) {
+                $groupsuffix = '_' . clean_filename($grp->name);
+            }
+        }
+    ?>
+    var cachedPdfFilename = <?php echo json_encode('ReportOfGrades_' . str_replace(' ', '_', clean_filename($coursename)) . $groupsuffix . '_' . date('Ymd') . '.pdf'); ?>;
     var isFetching = false;
 
     var courseId = <?php echo (int)$courseid; ?>;

@@ -255,7 +255,14 @@ foreach ($pages as $pageindex => $pagerows) {
     $pdf->Cell(0,  3, 'College Dean', 0, 1, 'C');
 }
 
-$filename = clean_filename('ReportOfGrades_' . str_replace(' ', '_', $coursename) . '_' . date('Ymd') . '.pdf');
+$groupsuffix = '';
+if ($groupid > 0) {
+    $grp = $DB->get_record('groups', ['id' => $groupid]);
+    if ($grp && !empty($grp->name)) {
+        $groupsuffix = '_' . clean_filename($grp->name);
+    }
+}
+$filename = clean_filename('ReportOfGrades_' . str_replace(' ', '_', $coursename) . $groupsuffix . '_' . date('Ymd') . '.pdf');
 while (ob_get_level()) {
     ob_end_clean();
 }
