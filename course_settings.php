@@ -600,7 +600,7 @@ echo '<div class="local-gradesheet-page">';
                             <td><?php echo s($row->descriptor); ?></td>
                             <td><?php echo $row->ispassing ? '<span class="badge badge-success">Yes</span>' : '<span class="badge badge-secondary">No</span>'; ?></td>
                             <td>
-                                <button type="button" class="btn btn-warning btn-sm me-1" onclick="toggleEditScale(<?php echo $row->id; ?>, true)">Edit</button>
+                                <button type="button" class="btn btn-warning btn-sm mr-1 me-1" onclick="toggleEditScale(<?php echo $row->id; ?>, true)">Edit</button>
                                 <form method="post" class="d-inline m-0" onsubmit="return confirm('Delete this grading bracket?');">
                                     <input type="hidden" name="action" value="deletetransmute">
                                     <input type="hidden" name="sesskey" value="<?php echo sesskey(); ?>">
@@ -638,7 +638,7 @@ echo '<div class="local-gradesheet-page">';
                                 </div>
                             </td>
                             <td>
-                                <button type="submit" class="btn btn-primary btn-sm me-1" form="edittransmuteform<?php echo $row->id; ?>">Save</button>
+                                <button type="submit" class="btn btn-primary btn-sm mr-1 me-1" form="edittransmuteform<?php echo $row->id; ?>">Save</button>
                                 <button type="button" class="btn btn-secondary btn-sm" onclick="toggleEditScale(<?php echo $row->id; ?>, false)">Cancel</button>
                             </td>
                         </tr>

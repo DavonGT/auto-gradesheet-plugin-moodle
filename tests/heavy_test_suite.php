@@ -188,10 +188,10 @@ class MockDB {
                 if ($params && isset($params[1]) && $row->itemtype == $params[1]) {
                     $match = false;
                 }
-                if (str_contains($select, 'itemname IS NOT NULL') && empty($row->itemname)) {
+                if (strpos($select, 'itemname IS NOT NULL') !== false && empty($row->itemname)) {
                     $match = false;
                 }
-                if (str_contains($select, 'gradetype = 1') && ($row->gradetype ?? 1) != 1) {
+                if (strpos($select, 'gradetype = 1') !== false && ($row->gradetype ?? 1) != 1) {
                     $match = false;
                 }
             } else if ($table === 'local_gradesheet_itemmap') {

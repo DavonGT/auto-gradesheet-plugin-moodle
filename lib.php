@@ -40,5 +40,31 @@ function local_gradesheet_extend_navigation(global_navigation $nav) {
 }
 
 function local_gradesheet_extend_settings_navigation($settingsnav, $context) {
-    // Intentionally empty — no settings nav needed
+    if (!$context || !($context instanceof context_course)) {
+        return;
+    }
+
+    $canmanage = has_capability('local/gradesheet:manage', $context);
+    $isteacher = $canmanage || has_capability('moodle/grade:viewall', $context);
+
+    $course = get_course($context->instanceid);
+    if (!$isteacher && empty($course->showgrades)) {
+        return;
+    }
+
+    if (has_capability('local/gradesheet:view', $context) || $canmanage) {
+        $coursenode = $settingsnav->find('courseadmin', navigation_node::TYPE_COURSE);
+        if ($coursenode) {
+            $url  = new moodle_url('/local/gradesheet/index.php', ['courseid' => $context->instanceid]);
+            $node = navigation_node::create(
+                'Grade Sheet',
+                $url,
+                navigation_node::TYPE_SETTING,
+                null,
+                'local_gradesheet_settings',
+                new pix_icon('i/grades', '')
+            );
+            $coursenode->add_node($node);
+        }
+    }
 }

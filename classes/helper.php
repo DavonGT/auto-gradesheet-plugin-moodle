@@ -205,7 +205,7 @@ class helper {
      * Returns custom transmutation brackets for a course, ordered high-to-low.
      * Cached per request so a full roster computation hits the table once.
      */
-    private static array $transmutecache = [];
+    private static $transmutecache = [];
 
     public static function get_custom_transmute_rows(int $courseid): array {
         global $DB;
@@ -697,7 +697,7 @@ class helper {
      * Renders standard table action buttons (edit / delete).
      */
     public static function render_table_actions(string $edit_url, string $delete_action, string $sesskey, string $delete_label = 'Delete', bool $delete_disabled = false, string $extra_hidden = '', string $confirm_msg = 'Delete this bracket?'): string {
-        $html = '<a href="' . htmlspecialchars($edit_url) . '" class="btn btn-warning btn-sm me-2">Edit</a>';
+        $html = '<a href="' . htmlspecialchars($edit_url) . '" class="btn btn-warning btn-sm mr-2 me-2">Edit</a>';
         if ($delete_disabled) {
             $html .= '<button type="button" class="btn btn-danger btn-sm disabled" tabindex="-1">' . htmlspecialchars($delete_label) . '</button>';
         } else {

@@ -360,3 +360,10 @@
     border: 1px solid #dee2e6;
 }
 
+/* Compatibility helpers for Bootstrap 4 (Moodle 3.9 - 4.3) and Bootstrap 5 */
+.me-1 { margin-right: 0.25rem !important; }
+.me-2 { margin-right: 0.5rem !important; }
+.ms-1 { margin-left: 0.25rem !important; }
+.ms-2 { margin-left: 0.5rem !important; }
+
+

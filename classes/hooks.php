@@ -40,9 +40,9 @@ class hooks {
     /**
      * Extend Moodle course edit form to add Gradesheet parameters.
      *
-     * @param \core_course\hook\after_form_definition $hook
+     * @param \core_course\hook\after_form_definition|object $hook
      */
-    public static function after_form_definition(\core_course\hook\after_form_definition $hook): void {
+    public static function after_form_definition($hook): void {
         global $DB, $USER;
 
         $mform = $hook->mform;
@@ -191,9 +191,9 @@ class hooks {
     /**
      * Save Gradesheet parameters when course form is submitted.
      *
-     * @param \core_course\hook\after_form_submission $hook
+     * @param \core_course\hook\after_form_submission|object $hook
      */
-    public static function after_form_submission(\core_course\hook\after_form_submission $hook): void {
+    public static function after_form_submission($hook): void {
         global $DB;
 
         $data = $hook->get_data();

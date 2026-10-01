@@ -253,7 +253,7 @@ if ($courseid) {
             }
             echo 'Printing and exporting are <strong>disabled</strong> until this is corrected. ';
             if ($canmanage) {
-                echo '<a href="course_settings.php?courseid=' . $courseid . '" class="btn btn-light btn-sm ms-2"><strong>Go to Settings</strong></a>';
+                echo '<a href="course_settings.php?courseid=' . $courseid . '" class="btn btn-light btn-sm ml-2 ms-2"><strong>Go to Settings</strong></a>';
             }
             echo '</div></div>';
         }
@@ -278,7 +278,7 @@ if ($courseid) {
             }
             echo implode(' ', $parts);
             if ($canmanage) {
-                echo '<a href="course_settings.php?courseid=' . $courseid . '" class="btn btn-light btn-sm ms-2"><strong>Go to Settings</strong></a>';
+                echo '<a href="course_settings.php?courseid=' . $courseid . '" class="btn btn-light btn-sm ml-2 ms-2"><strong>Go to Settings</strong></a>';
             }
             echo '</div></div>';
         }

@@ -28,6 +28,12 @@ if ($groupid > 0 && !helper::check_group_access($context, $groupid)) {
 }
 
 if (!class_exists(\PhpOffice\PhpSpreadsheet\Spreadsheet::class)) {
+    if (file_exists($CFG->libdir . '/phpspreadsheet/vendor/autoload.php')) {
+        require_once($CFG->libdir . '/phpspreadsheet/vendor/autoload.php');
+    }
+}
+
+if (!class_exists(\PhpOffice\PhpSpreadsheet\Spreadsheet::class)) {
     redirect(
         new moodle_url('/local/gradesheet/index.php', ['courseid' => $courseid]),
         'Excel export requires PhpSpreadsheet which is not available on this Moodle installation.',

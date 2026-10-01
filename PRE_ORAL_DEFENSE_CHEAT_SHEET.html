@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pre-Oral Defense Master Cheat Sheet (Chapters 1-3)</title>
+    <style>
+        :root {
+            --primary: #1e3a8a;
+            --primary-light: #eff6ff;
+            --primary-border: #bfdbfe;
+            --text: #1f2937;
+            --text-muted: #4b5563;
+            --bg: #f8fafc;
+            --card-bg: #ffffff;
+            --border: #e2e8f0;
+            --danger: #b91c1c;
+            --danger-bg: #fef2f2;
+            --success: #15803d;
+            --success-bg: #f0fdf4;
+            --warning-border: #f59e0b;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            line-height: 1.6;
+            color: var(--text);
+            background-color: var(--bg);
+            margin: 0;
+            padding: 24px;
+        }
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            background: var(--card-bg);
+            padding: 40px 48px;
+            border-radius: 12px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.06);
+            border: 1px solid var(--border);
+        }
+        .header-actions {
+            display: flex;
+            justify-content: flex-end;
+            margin-bottom: 20px;
+        }
+        .btn-print {
+            background-color: var(--primary);
+            color: white;
+            padding: 10px 18px;
+            font-size: 14px;
+            font-weight: 600;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.15);
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            transition: all 0.2s ease;
+        }
+        .btn-print:hover {
+            background-color: #1d4ed8;
+            transform: translateY(-1px);
+        }
+        h1 {
+            color: var(--primary);
+            font-size: 26px;
+            border-bottom: 3px solid var(--primary);
+            padding-bottom: 12px;
+            margin-top: 0;
+        }
+        h2 {
+            color: #0f172a;
+            font-size: 20px;
+            margin-top: 36px;
+            border-bottom: 1px solid var(--border);
+            padding-bottom: 8px;
+        }
+        h3 {
+            color: #334155;
+            font-size: 16px;
+            margin-top: 24px;
+        }
+        h4 {
+            color: #1e293b;
+            font-size: 15px;
+            margin-top: 20px;
+            margin-bottom: 8px;
+        }
+        p, li {
+            font-size: 15px;
+            color: #374151;
+        }
+        code {
+            background-color: #f1f5f9;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+            font-size: 13px;
+            color: #0f172a;
+            border: 1px solid #e2e8f0;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 20px 0;
+            font-size: 14px;
+        }
+        th, td {
+            padding: 12px 14px;
+            text-align: left;
+            border: 1px solid var(--border);
+            vertical-align: top;
+        }
+        th {
+            background-color: #f1f5f9;
+            color: #0f172a;
+            font-weight: 600;
+        }
+        tr:nth-child(even) td {
+            background-color: #f8fafc;
+        }
+        blockquote {
+            margin: 14px 0;
+            padding: 14px 18px;
+            background-color: var(--primary-light);
+            border-left: 4px solid var(--primary);
+            border-radius: 0 8px 8px 0;
+            color: #1e293b;
+            font-style: normal;
+        }
+        blockquote p {
+            margin: 0;
+            line-height: 1.55;
+        }
+        ul {
+            padding-left: 20px;
+        }
+        li {
+            margin-bottom: 6px;
+        }
+        hr {
+            border: 0;
+            height: 1px;
+            background: var(--border);
+            margin: 32px 0;
+        }
+        .badge {
+            display: inline-block;
+            background: #dbeafe;
+            color: #1e40af;
+            font-size: 12px;
+            font-weight: bold;
+            padding: 2px 8px;
+            border-radius: 12px;
+            margin-bottom: 6px;
+        }
+        @media print {
+            body {
+                background: white;
+                padding: 0;
+            }
+            .container {
+                box-shadow: none;
+                border: none;
+                padding: 0;
+                max-width: 100%;
+            }
+            .header-actions {
+                display: none;
+            }
+            h2 {
+                page-break-before: auto;
+            }
+            table, blockquote {
+                page-break-inside: avoid;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header-actions">
+            <button class="btn-print" onclick="window.print()">
+                🖨️ Print / Save as PDF
+            </button>
+        </div>
+        <h1>🎓 PRE-ORAL DEFENSE MASTER CHEAT SHEET (CHAPTERS 1–3)</h1>
+<p><strong>Thesis Title:</strong> Automated Grade Sheet Generation Plugin for the Moodle Learning Management System for Faculty Grade Reporting<br />
+<strong>Locale:</strong> College of Computer Studies (CCS), Eastern Samar State University (ESSU) Main Campus<br />
+<strong>Target Users / Sample Size:</strong> N = 3 Faculty Members (Complete Enumeration / Total Population)<br />
+<strong>Research Design:</strong> Developmental-Descriptive | <strong>SDLC:</strong> Prototyping Model (Sommerville, 2015)<br />
+<strong>Evaluation Standard:</strong> ISO/IEC 25010 Software Quality Model (Functional Suitability, Usability, Performance Efficiency)  </p>
+<hr />
+<h2>📌 QUICK-GLANCE SUMMARY TABLE (THE 1-PAGE SUMMARY)</h2>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">Chapter</th>
+<th style="text-align: left;">Core Focus</th>
+<th style="text-align: left;">Foundational Concepts &amp; Citations</th>
+<th style="text-align: left;">The #1 Trap Question</th>
+<th style="text-align: left;">Your Winning Defense Keyword</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;"><strong>Ch. 1: Introduction</strong></td>
+<td style="text-align: left;">The Problem, Objectives, Scope (N = 3)</td>
+<td style="text-align: left;">• Baseline survey: 6–10 hrs wasted on CSV reformatting<br>• Clerical errors &amp; encoding fatigue</td>
+<td style="text-align: left;"><em>"Why not just use an Excel Macro? Why build a plugin?"</em></td>
+<td style="text-align: left;"><strong>"Internal LMS Automation &amp; Zero Data Tampering"</strong> (Data stays inside Moodle; eliminates offline copy-paste risks).</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Ch. 2: RRL / Studies</strong></td>
+<td style="text-align: left;">Theoretical Justification &amp; Evidence</td>
+<td style="text-align: left;">• <strong>TAM (Davis, 1989):</strong> Perceived Usefulness &amp; Ease of Use<br>• <strong>Transmutation (Guskey, 2015):</strong> 1.0–5.0 scaling<br>• <strong>Prototyping (Sommerville, 2015):</strong> Localized UI/report fit</td>
+<td style="text-align: left;"><em>"Davis (1989) is 35 years old! Why use an outdated citation?"</em></td>
+<td style="text-align: left;"><strong>"Seminal/Foundational Theory"</strong> paired with contemporary studies (Henderson, 2017; Moodle, 2025).</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Ch. 3: Methodology</strong></td>
+<td style="text-align: left;">Architecture, SDLC, Database, Testing</td>
+<td style="text-align: left;">• <strong>Thin-Controller &amp; Thick-Service Pattern</strong><br>• <strong>Moodle XMLDB</strong> (5 custom tables)<br>• <strong>Descriptive Statistics</strong> (Mean &amp; %)</td>
+<td style="text-align: left;"><em>"Can instructors edit grades directly inside your plugin?"</em></td>
+<td style="text-align: left;"><strong>"Single Source of Truth"</strong> (Raw grades stay in Moodle Gradebook; plugin only computes and maps).</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2>🏛️ CHAPTER 1: THE FOUNDATION &amp; MOTIVATION</h2>
+<h3>1. The Core Problem Statement</h3>
+<ul>
+<li><strong>The Current Reality:</strong> Moodle is used for quizzes, exams, and attendance, but its native grade export is a <strong>raw CSV file</strong>.</li>
+<li><strong>The Operational Friction:</strong> Instructors must manually open Excel, copy-paste rows, split columns, manually calculate percentage formulas, apply transmutation, and format everything to match the Registrar's paper layout.</li>
+<li><strong>The Empirical Proof (Your Baseline Survey):</strong></li>
+<li><strong>100%</strong> of respondents currently copy-paste from raw CSV into Excel.</li>
+<li><strong>66.67%</strong> spend <strong>6 to 10 hours per semester</strong> purely on data cleaning and reformatting.</li>
+<li>Baseline composite pain rating: <strong>4.89 / 5.00 (Strongly Agree)</strong> regarding encoding fatigue and clerical vulnerability.</li>
+</ul>
+<h3>2. General &amp; Specific Objectives</h3>
+<ul>
+<li><strong>General:</strong> Design, develop, and evaluate an Automated Grade Sheet Generation Plugin for Moodle for faculty grade reporting in CCS, ESSU Main Campus.</li>
+<li><strong>Specific Objective 1:</strong> Determine system requirements and architectural design needed for the plugin.</li>
+<li><strong>Specific Objective 2:</strong> Develop the plugin for seamless integration in terms of:</li>
+<li><em>(a)</em> Data retrieval from Moodle gradebook,</li>
+<li><em>(b)</em> Grade computation, transmutation, and student status management, and</li>
+<li><em>(c)</em> Registrar-aligned report formatting and export (PDF &amp; Excel).</li>
+<li><strong>Specific Objective 3:</strong> Evaluate user acceptability based on <strong>ISO/IEC 25010</strong> software quality characteristics:</li>
+<li><em>(a)</em> Functional Suitability,</li>
+<li><em>(b)</em> Usability, and</li>
+<li><em>(c)</em> Performance Efficiency.</li>
+</ul>
+<hr />
+<h3>3. Top Chapter 1 Trap Questions &amp; Verbatim Answers</h3>
+<h4>❓ Q1.1: "Why build a Moodle plugin? Why not just give teachers an Excel Macro or Google Sheets template?"</h4>
+<blockquote>
+<p><strong>Verbatim Answer:</strong><br />
+<em>"An Excel macro or Google Sheet still forces an offline, disconnected workflow. Instructors must repeatedly export CSV files, move sensitive grade data to personal computers, and handle manual file transfers where formulas can accidentally break or rows can shift. Our plugin automates the entire process directly inside Moodle using its native Gradebook API. The data never leaves the secure LMS, eliminating copy-paste errors, broken formulas, and encoding fatigue entirely."</em></p>
+</blockquote>
+<h4>❓ Q1.2: "Your sample size is only 3 faculty members (N = 3). Isn't that too small for a thesis?"</h4>
+<blockquote>
+<p><strong>Verbatim Answer:</strong><br />
+<em>"Our sampling technique is </em><em>Complete Enumeration (Total Population Sampling)</em><em>. In the College of Computer Studies at ESSU Main Campus, exactly three faculty members actively utilize the Moodle LMS for student grading in their workflow. We did not sample a tiny fraction of a large group; we captured </em><em>100% of the active user population</em><em> for this specific institutional process. Furthermore, Nielsen’s usability engineering principles establish that 3 to 5 domain-expert evaluators interacting with a focused interface discover over 80% of functional and usability issues."</em></p>
+</blockquote>
+<h4>❓ Q1.3: "Does the University Registrar officially accept this generated format?"</h4>
+<blockquote>
+<p><strong>Verbatim Answer:</strong><br />
+<em>"Our plugin does not alter university grading policy; it produces a </em><em>Registrar-Aligned Grade Sheet</em><em> that programmatically replicates the exact required structure, fields, transmutation scale, and signatory blocks approved by the institution. Furthermore, to prevent future obsolescence if formatting requirements change, category percentage weights and course metadata are dynamically configurable via our custom configuration tables."</em></p>
+</blockquote>
+<h4>❓ Q1.4: "How does your system comply with the Data Privacy Act of 2012 (RA 10173)?"</h4>
+<blockquote>
+<p><strong>Verbatim Answer:</strong><br />
+<em>"The plugin strictly inherits Moodle’s native </em><em>Role-Based Access Control (RBAC)</em><em> and capability system (<code>access.php</code>). Only authenticated instructors with the <code>editingteacher</code> role for that specific course can access the configuration, grading tables, and export functions. Student data is never exposed to third-party APIs or outside servers, and students only have read-only access to their own individualized grade cards."</em></p>
+</blockquote>
+<hr />
+<h2>📚 CHAPTER 2: THE THEORETICAL BACKBONE &amp; LITERATURE</h2>
+<h3>1. Plain-English Map of Your Citations</h3>
+<ul>
+<li><strong>Coates et al. (2005) &amp; Lonn and Teasley (2009):</strong> LMSs centralize materials, but faculty often preserve disconnected manual routines for administrative reporting.</li>
+<li><strong>Beatty and Ulasewicz (2006) &amp; Costa et al. (2012):</strong> Faculty only adopt LMS tools when they solve authentic, practical operational tasks rather than providing abstract tech features.</li>
+<li><strong>Henderson et al. (2017):</strong> Faculty value digital technologies that are time-saving and alleviate administrative burden.</li>
+<li><strong>Davis (1989) - Technology Acceptance Model (TAM):</strong> The core theory. Acceptance is determined by <strong>Perceived Usefulness (PU)</strong> (saving 6–10 hours) and <strong>Perceived Ease of Use (PEOU)</strong> (one-click generation).</li>
+<li><strong>Guskey (2015) &amp; Bates (2015):</strong> Grade Transmutation converts raw scores into institutional ordinal scales (1.0 - 5.0), and systems must handle non-numeric states (<em>"Incomplete"</em>, <em>"Dropped"</em>).</li>
+<li><strong>Welling and Thomson (2016):</strong> Automated, server-side document generation (PDF/Excel) directly from web databases.</li>
+<li><strong>Sommerville (2015):</strong> The <strong>Prototyping Model</strong> is ideal when building systems shaped around strict user-interface layouts and localized document outputs.</li>
+<li><strong>ISO/IEC 25010 (2011) / Miguel et al. (2014):</strong> International standard to systematically evaluate software quality (Functional Suitability, Usability, Performance Efficiency).</li>
+</ul>
+<hr />
+<h3>2. Top Chapter 2 Trap Questions &amp; Verbatim Answers</h3>
+<h4>❓ Q2.1: "What is the Theoretical or Conceptual Framework of your study?"</h4>
+<blockquote>
+<p><strong>Verbatim Answer:</strong><br />
+<em>"Our study is anchored on two frameworks:<br />
+1. </em><em>Davis’s (1989) Technology Acceptance Model (TAM)</em><em> as our theoretical foundation—which posits that adoption is driven by </em><em>Perceived Usefulness</em><em> (time saved eliminating manual data cleaning) and </em><em>Perceived Ease of Use</em><em> (intuitive, one-click interface).<br />
+2. </em><em>The ISO/IEC 25010 Software Quality Model</em><em> as our evaluation framework—specifically measuring Functional Suitability, Usability, and Performance Efficiency."</em></p>
+</blockquote>
+<h4>❓ Q2.2: "Davis (1989) is over 35 years old! Why cite an old theory in a computer thesis?"</h4>
+<blockquote>
+<p><strong>Verbatim Answer:</strong><br />
+<em>"Davis (1989) is the </em><em>seminal (foundational) literature</em><em> that established the Technology Acceptance Model. Foundational theories in software adoption do not expire. To ensure modern relevance, we paired Davis with contemporary studies such as Henderson et al. (2017) and recent Moodle research (2025) to prove that perceived usefulness and ease of use remain active and directly applicable to faculty workflows today."</em></p>
+</blockquote>
+<h4>❓ Q2.3: "Why didn't you just use existing Moodle plugins from moodle.org?"</h4>
+<blockquote>
+<p><strong>Verbatim Answer:</strong><br />
+<em>"As observed by Costa et al. (2012), generic LMS extensions fail to resolve localized institutional workflows. Existing Moodle export plugins (like Configurable Reports or native CSV export) only dump raw, linear score columns. They do not support ESSU’s specific grading logic: separating Midterms and Finals, custom lecture/lab category weightings, automated transmutation into the Philippine 1.0–5.0 grading scale, non-numeric status overrides (INC, DRP), and generating the exact registrar-compliant layout with official signatory blocks."</em></p>
+</blockquote>
+<h4>❓ Q2.4: "Why did you synthesize literature thematically instead of having separate Local and Foreign Literature sections?"</h4>
+<blockquote>
+<p><strong>Verbatim Answer:</strong><br />
+<em>"We structured Chapter 2 thematically according to modern Software Engineering literature standards—grouping research around core technical pillars: LMS Adoption Barriers, Grade Transmutation, Automated Document Generation, SDLC Prototyping, and ISO Quality Evaluation. This provides a direct, logical bridge from theory to our technical implementation in Chapter 3."</em></p>
+</blockquote>
+<hr />
+<h2>⚙️ CHAPTER 3: METHODOLOGY &amp; TECHNICAL ARCHITECTURE</h2>
+<h3>1. System Architecture &amp; The 5 Custom Database Tables</h3>
+<ul>
+<li><strong>Architectural Pattern:</strong> <strong>Thin-Controller &amp; Thick-Service Modular Pattern</strong>.</li>
+<li><em>Thin Controller (<code>view.php</code>, <code>export.php</code>):</em> Handles user input, session authentication, and renders HTML/PDF/Excel.</li>
+<li><em>Thick Service (<code>classes/service/</code> / <code>locallib.php</code>):</em> Centralizes all data retrieval, weighting math, transmutation calculations, and validation rules.</li>
+<li><em>Why this matters:</em> <strong>Single Source of Truth.</strong> On-screen previews, PDF exports, and Excel spreadsheets always call the exact same calculation service. They will never display different grades!</li>
+<li><strong>Database Management:</strong> Uses Moodle’s database abstraction layer (<code>$DB</code>) and <strong>XMLDB schema definitions</strong> (<code>db/install.xml</code>):</li>
+<li><code>local_gradesheet_config</code>: Stores course report metadata, terms, and authorized institutional signatories.</li>
+<li><code>local_gradesheet_categories</code>: Stores dynamic category definitions, display names, and assigned percentage weights.</li>
+<li><code>local_gradesheet_itemmap</code>: Junction table linking native Moodle <code>grade_items</code> to specific grading periods (Midterm/Final).</li>
+<li><code>local_gradesheet_transmute</code>: Defines transmutation boundary brackets (e.g., 95–100% = 1.0, 75–79% = 3.0).</li>
+<li><code>local_gradesheet_status</code>: Tracks student-specific non-numeric academic status overrides (<em>Incomplete</em>, <em>Dropped</em>, <em>Withdrawn</em>).</li>
+</ul>
+<h3>2. The 3 Computation Fail-Safes (Flowchart Logic)</h3>
+<ol>
+<li><strong>Weight Validation (100% Rule):</strong> The system checks whether category weights equal exactly 100%. If sum of weights != 100%, the export and print buttons are <strong>intentionally locked</strong> and a warning is displayed.</li>
+<li><strong>Unmapped Items Safety Banner:</strong> Activities in Moodle not assigned to any category are excluded from calculations and flagged with a warning banner to prevent artificial grade distortion.</li>
+<li><strong>Status Overrides:</strong> Flags for "Incomplete" or "Dropped" take precedence over mathematical calculations to ensure accurate administrative reporting.</li>
+</ol>
+<hr />
+<h3>3. Top Chapter 3 Trap Questions &amp; Verbatim Answers</h3>
+<h4>❓ Q3.1: "Can an instructor edit student raw grades directly inside your plugin interface?"</h4>
+<blockquote>
+<p><strong>Verbatim Answer:</strong><br />
+<em>"</em><em>No</em><em>, instructors cannot alter raw activity scores inside the plugin. To maintain Moodle as the </em><em>Single Source of Truth</em><em>, all assignment, quiz, and exam scores must be updated in Moodle’s native gradebook. The plugin automatically fetches and recalculates the updated data. The plugin only allows configuring metadata, category weights, and official institutional status overrides (INC / DRP)."</em></p>
+</blockquote>
+<h4>❓ Q3.2: "Why didn't you use inferential statistics (T-test, ANOVA, or Pearson r) in your Data Analysis?"</h4>
+<blockquote>
+<p><strong>Verbatim Answer:</strong><br />
+<em>"Inferential statistics are designed to estimate population parameters from a sample. Because our study utilized </em><em>Complete Enumeration (Total Population Sampling, N = 3)</em><em>, we evaluated 100% of the target user population in the locale. In total population studies, descriptive statistics (weighted mean, frequency, percentage) provide exact parametric measurements of the group. Applying inferential tests to an N = 3 total population is statistically invalid."</em></p>
+</blockquote>
+<h4>❓ Q3.3: "Was your evaluation questionnaire validated? Did you compute Cronbach’s Alpha?"</h4>
+<blockquote>
+<p><strong>Verbatim Answer:</strong><br />
+<em>"Our evaluation questionnaire was adapted directly from the international </em><em>ISO/IEC 25010 Software Quality Model</em><em>. Content and face validation were conducted by IT faculty experts and our adviser using an evaluation checklist to ensure construct validity. Because our sample size is N = 3, internal consistency metrics like Cronbach’s Alpha are mathematically volatile; expert content validation is the recognized standard for domain-specific evaluations with total population sampling."</em></p>
+</blockquote>
+<h4>❓ Q3.4: "How did you test the system for 2,500 students if your actual classes have only 50 students?"</h4>
+<blockquote>
+<p><strong>Verbatim Answer:</strong><br />
+<em>"We conducted stress-testing using backend Command Line Interface (CLI) scripts and an assertion-based test harness that generated synthetic cohorts of up to 2,500 students. This tested server memory limits, database query execution times, and PDF rendering (TCPDF) under extreme loads to verify the ISO/IEC 25010 </em><em>Performance Efficiency</em><em> requirement, ensuring zero timeouts during university-wide peak grading deadlines."</em></p>
+</blockquote>
+<hr />
+<h2>🎯 DEFENSE DAY SURVIVAL GUIDE (THE DO'S &amp; DON'TS)</h2>
+<h3>👥 Team Role Delegation</h3>
+<ul>
+<li><strong>Speaker 1 (The Problem &amp; Context):</strong> Presents Background, Baseline Pain Points (Table 4.1/4.2 data), and Objectives.</li>
+<li><strong>Speaker 2 (The Theory &amp; Architecture):</strong> Presents Literature justification, SDLC Prototyping, and Thin-Controller/Thick-Service design.</li>
+<li><strong>Speaker 3 (The Methodologist &amp; Evaluation):</strong> Presents Scope, N = 3 Complete Enumeration defense, XMLDB schema, and ISO/IEC 25010 testing.</li>
+</ul>
+<h3>💡 5 Golden Rules During Oral Defense</h3>
+<ol>
+<li><strong>Never Say "We just wanted to make...":</strong>  </li>
+<li><em>Instead say:</em> "Based on our empirical baseline assessment and Sommerville's prototyping methodology..."</li>
+<li><strong>Never Apologize for N = 3:</strong>  </li>
+<li>Own it! Say: <em>"Complete Enumeration of the total active user population in the College of Computer Studies."</em></li>
+<li><strong>Pause for 2 Seconds Before Answering:</strong>  </li>
+<li>Don't interrupt the panelist. Listen, nod, breathe, and begin with: <em>"Thank you for that question, Sir/Ma'am..."</em></li>
+<li><strong>Refer to Your Slides / Artifacts:</strong>  </li>
+<li><em>"As shown in our Flowchart (Figure 3.2)..."</em> or <em>"As outlined in Table 4.1..."</em></li>
+<li><strong>Never Blame Your Groupmates:</strong>  </li>
+<li>Stand as one unified team. If your teammate is struggling, gently add: <em>"To supplement my colleague's point, the architecture specifically handles that by..."</em></li>
+</ol>
+    </div>
+</body>
+</html>
