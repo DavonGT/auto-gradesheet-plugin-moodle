@@ -499,3 +499,9 @@
 .local-gradesheet-page .gs-advanced-summary::-webkit-details-marker { display: none; }
 .local-gradesheet-page .gs-advanced-summary::before { content: "\25B8"; margin-right: .5rem; color: #6c757d; }
 .local-gradesheet-page .gs-advanced[open] .gs-advanced-summary::before { content: "\25BE"; }
+
+/* ── Sections ───────────────────────────────────────────────────────────── */
+.local-gradesheet-page .gs-sections { border-left: 4px solid #343a40; }
+.local-gradesheet-page .gs-section-picker select { min-width: 16rem; }
+.local-gradesheet-page .gs-section-table td, .local-gradesheet-page .gs-section-table th { vertical-align: middle; }
+.local-gradesheet-page .gs-section-title .badge { font-size: .8rem; vertical-align: middle; }

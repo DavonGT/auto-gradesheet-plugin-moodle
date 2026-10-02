@@ -23,7 +23,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && optional_param('action', '', PARAM_
 
 //optional params
 $courseid = optional_param('courseid', 0, PARAM_INT);
-$groupid  = optional_param('group', 0, PARAM_INT);
+// 'group' may be a group id, 'all' for the combined sheet, or absent (pick a sensible default).
+$grouprequested = optional_param('group', '', PARAM_ALPHANUMEXT);
+$groupid  = ctype_digit($grouprequested) ? (int)$grouprequested : 0;
 $context = null;
 
 //if there is a course selected set context and require login
@@ -219,19 +221,84 @@ if ($courseid) {
         $groupmode = groups_get_course_groupmode($course_obj);
 
         if ($groupid > 0 && !helper::check_group_access($context, $groupid)) {
-            echo $OUTPUT->notification('You do not have permission to access the requested group.', 'error');
+            echo $OUTPUT->notification('You do not have permission to access the requested section.', 'error');
             $groupid = -1;
         }
 
-        if ($groupmode != NOGROUPS) {
-            echo '<div class="mb-3">';
-            groups_print_course_menu($course_obj, $PAGE->url);
-            echo '</div>';
+        // ── Sections ───────────────────────────────────────────────────────
+        // A Moodle group is a section. Each section gets its own grade sheet:
+        // own roster, own header, own exports. Shown whenever the course has
+        // groups, whatever the course's group mode setting.
+        $sections    = helper::get_accessible_sections($context);
+        $cancombined = helper::can_view_combined($context);
+        if ($grouprequested === '' && $groupid === 0) {
+            $groupid = helper::default_section($context);   // first section when sections exist
+        } else if ($grouprequested === 'all') {
+            $groupid = $cancombined ? 0 : helper::default_section($context);
+        }
+        if ($groupid === 0 && !$cancombined) {
+            $groupid = -1; // SEPARATEGROUPS teacher with no section at all
         }
 
-        $activegroup = groups_get_course_group($course_obj);
-        if ($groupid === 0 && $activegroup) {
-            $groupid = (int)$activegroup;
+        if (!empty($sections)) {
+            $cursection = ($groupid > 0 && isset($sections[$groupid])) ? $sections[$groupid] : null;
+            echo '<div class="gs-sections card mb-3">';
+            echo '<div class="card-body py-2">';
+            echo '<form method="get" class="form-inline gs-section-picker">';
+            echo '<input type="hidden" name="courseid" value="' . $courseid . '">';
+            echo '<label for="gsSection" class="mr-2 me-2"><strong>Section:</strong></label>';
+            echo '<select name="group" id="gsSection" class="form-control form-control-sm mr-2 me-2" onchange="this.form.submit()">';
+            foreach ($sections as $gid => $g) {
+                echo '<option value="' . $gid . '"' . ($groupid === (int)$gid ? ' selected' : '') . '>' . s(format_string($g->name)) . '</option>';
+            }
+            if ($cancombined) {
+                echo '<option value="all"' . ($groupid === 0 ? ' selected' : '') . '>All sections combined (one sheet)</option>';
+            }
+            echo '</select>';
+            echo '<span class="text-muted small">Each section is a separate grade sheet with its own roster, header and exports.</span>';
+            echo '</form>';
+
+            // Overview: one row per section with its own print/export buttons.
+            if ($canmanage) {
+                echo '<details class="gs-details mt-2"' . (count($sections) > 1 ? ' open' : '') . '>';
+                echo '<summary>All sections at a glance (' . count($sections) . ')</summary>';
+                echo '<div class="table-responsive"><table class="table table-sm table-bordered mb-2 gs-section-table">';
+                echo '<thead class="thead-light"><tr><th>Section</th><th>Students</th><th>Graded</th><th>Pass rate</th><th>Instructor line</th><th class="text-right">Grade sheet</th></tr></thead><tbody>';
+                $printok = $weightvalid['valid'];
+                foreach ($sections as $gid => $g) {
+                    $sec = \local_gradesheet\gradesheet_service::compute_all_grades($courseid, (int)$gid);
+                    $n   = count($sec['rows']);
+                    $gp  = '&group=' . (int)$gid;
+                    $dis = $printok && $n > 0 ? '' : ' disabled';
+                    echo '<tr' . ($groupid === (int)$gid ? ' class="table-active"' : '') . '>';
+                    echo '<td><a href="index.php?courseid=' . $courseid . $gp . '"><strong>' . s(format_string($g->name)) . '</strong></a></td>';
+                    echo '<td>' . $n . ($n === 0 ? ' <span class="badge badge-warning">empty</span>' : '') . '</td>';
+                    echo '<td>' . $sec['total'] . ($sec['othercount'] ? ' <small class="text-muted">+' . $sec['othercount'] . ' INC/Dr/WP/IP</small>' : '') . '</td>';
+                    echo '<td>' . ($sec['total'] > 0 ? $sec['passrate'] . '%' : '-') . '</td>';
+                    echo '<td>' . ($sec['instructor'] !== '' ? s($sec['instructor']) : '<span class="text-danger">blank</span>') . '</td>';
+                    echo '<td class="text-right text-nowrap">';
+                    echo '<a href="preview.php?courseid=' . $courseid . $gp . '" class="btn btn-outline-primary btn-sm' . $dis . '" title="Preview this section\'s sheet">Preview</a> ';
+                    echo '<a href="export.php?courseid=' . $courseid . $gp . '" class="btn btn-outline-success btn-sm' . $dis . '">PDF</a> ';
+                    echo '<a href="export_excel.php?courseid=' . $courseid . $gp . '" class="btn btn-outline-success btn-sm' . $dis . '">Excel</a>';
+                    echo '</td></tr>';
+                }
+                echo '</tbody></table></div>';
+                echo '<a href="export_all.php?courseid=' . $courseid . '" class="btn btn-success btn-sm' . ($printok ? '' : ' disabled') . '">&#128230; Download every section as PDF (ZIP)</a>';
+                $ungrouped = helper::get_ungrouped_students($context);
+                if (!empty($ungrouped)) {
+                    $names = array_map(function ($u) { return s($u->lastname . ', ' . $u->firstname); }, array_slice($ungrouped, 0, 5));
+                    echo '<div class="alert alert-warning py-2 mt-2 mb-0"><strong>' . count($ungrouped) . ' student(s) are in no section</strong> and will appear on no section sheet: '
+                        . implode('; ', $names) . (count($ungrouped) > 5 ? '; &hellip;' : '')
+                        . '. Add them to a group under <em>Participants &rarr; Groups</em>.</div>';
+                }
+                echo '</details>';
+            }
+            echo '</div></div>';
+
+            if ($cursection) {
+                $safecoursename = s(format_string($coursename));
+                echo '<h4 class="gs-section-title">' . $safecoursename . ' <span class="badge badge-dark">' . s(format_string($cursection->name)) . '</span></h4>';
+            }
         }
 
         $students  = helper::get_non_teaching_students($context, $groupid);
@@ -240,8 +307,12 @@ if ($courseid) {
         $rules     = helper::get_computation_rules($courseid);
 
         $safecoursename = s(format_string($coursename));
-        echo '<hr>';
-        echo "<h4>Students and Grades - {$safecoursename}</h4>";
+        if (empty($sections)) {
+            echo '<hr>';
+            echo "<h4>Students and Grades - {$safecoursename}</h4>";
+        } else if ($groupid === 0) {
+            echo '<h4 class="gs-section-title">' . $safecoursename . ' <span class="badge badge-secondary">All sections combined</span></h4>';
+        }
 
         // ── One status panel instead of a stack of alerts ─────────────────
         // Blocking problems get a "Getting started" checklist; otherwise a quiet
@@ -332,8 +403,8 @@ if ($courseid) {
             echo '<a href="export_excel.php?courseid=' . $courseid . $groupparam . '" class="btn btn-outline-success' . $btncls . '"' . $why . '>Download Excel</a> ';
             echo '<a href="course_settings.php?courseid=' . $courseid . '" class="btn btn-outline-secondary ml-auto ms-auto">&#9881; Settings</a>';
             echo '</div>';
-            if ($groupid > 0) {
-                echo '<p class="text-muted small">Exports contain only the section selected above. Pick "All participants" to print the whole course.</p>';
+            if ($groupid > 0 && isset($sections[$groupid])) {
+                echo '<p class="text-muted small">These buttons print <strong>' . s(format_string($sections[$groupid]->name)) . '</strong> only. Use the section picker above to switch, or "Download every section" for all of them at once.</p>';
             }
         }
 

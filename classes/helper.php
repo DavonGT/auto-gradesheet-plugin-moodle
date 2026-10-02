@@ -687,6 +687,85 @@ class helper {
         return true;
     }
 
+    /**
+     * Sections (Moodle groups) the current user may open a grade sheet for.
+     * Under SEPARATEGROUPS without accessallgroups that is only their own
+     * groups; otherwise every group in the course. Keyed by group id, in
+     * name order.
+     */
+    public static function get_accessible_sections(\context_course $context): array {
+        global $DB, $USER;
+        $courseid = (int)$context->instanceid;
+        $groups = groups_get_all_groups($courseid);
+        if (empty($groups)) {
+            return [];
+        }
+        $course = $DB->get_record('course', ['id' => $courseid]);
+        $restricted = $course && groups_get_course_groupmode($course) == SEPARATEGROUPS
+            && !has_capability('moodle/site:accessallgroups', $context);
+        $out = [];
+        foreach ($groups as $g) {
+            if ($restricted && !groups_is_member((int)$g->id, $USER->id)) {
+                continue;
+            }
+            $out[(int)$g->id] = $g;
+        }
+        uasort($out, function ($a, $b) {
+            return strnatcasecmp((string)$a->name, (string)$b->name);
+        });
+        return $out;
+    }
+
+    /** Whether the current user may view the combined (all sections) sheet. */
+    public static function can_view_combined(\context_course $context): bool {
+        global $DB;
+        $course = $DB->get_record('course', ['id' => (int)$context->instanceid]);
+        if (!$course || groups_get_course_groupmode($course) != SEPARATEGROUPS) {
+            return true;
+        }
+        return has_capability('moodle/site:accessallgroups', $context);
+    }
+
+    /**
+     * Resolves which section to show when the page is opened without an
+     * explicit choice: the active group if any, else the first accessible
+     * section, else 0 (combined / no groups).
+     */
+    public static function default_section(\context_course $context): int {
+        global $DB;
+        $sections = self::get_accessible_sections($context);
+        if (empty($sections)) {
+            return 0;
+        }
+        $course = $DB->get_record('course', ['id' => (int)$context->instanceid]);
+        $active = $course ? (int)groups_get_course_group($course) : 0;
+        if ($active > 0 && isset($sections[$active])) {
+            return $active;
+        }
+        return (int)array_key_first($sections);
+    }
+
+    /**
+     * Students enrolled in the course who belong to no group at all. When a
+     * course is split into sections these students appear on no section
+     * sheet, so faculty must be told.
+     */
+    public static function get_ungrouped_students(\context_course $context): array {
+        $courseid = (int)$context->instanceid;
+        $all = get_enrolled_users($context, '', 0, 'u.*', 'u.lastname ASC, u.firstname ASC');
+        $teachers = get_enrolled_users($context, 'local/gradesheet:manage', 0, 'u.id');
+        $out = [];
+        foreach ($all as $u) {
+            if (is_siteadmin($u->id) || isset($teachers[$u->id]) || has_capability('moodle/grade:viewall', $context, $u->id)) {
+                continue;
+            }
+            if (empty(groups_get_user_groups($courseid, $u->id)[0])) {
+                $out[] = $u;
+            }
+        }
+        return $out;
+    }
+
     public static function get_non_teaching_students(\context_course $context, int $groupid = 0): array {
         global $DB, $USER;
 

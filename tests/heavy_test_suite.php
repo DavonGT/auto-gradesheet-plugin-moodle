@@ -404,6 +404,14 @@ function groups_get_all_groups($courseid, $userid = 0, $groupingid = 0, $fields 
     global $DB;
     return $DB->get_records('groups', ['courseid' => $courseid]);
 }
+function groups_get_user_groups($courseid, $userid = 0): array {
+    global $DB, $MOCK_GROUP_MEMBERS;
+    $ids = [];
+    foreach ($DB->get_records('groups', ['courseid' => $courseid]) as $g) {
+        if (in_array("{$g->id}:{$userid}", $MOCK_GROUP_MEMBERS)) { $ids[] = (int)$g->id; }
+    }
+    return [0 => $ids];
+}
 function groups_is_member(int $groupid, int $userid): bool {
     global $MOCK_GROUP_MEMBERS;
     return in_array("{$groupid}:{$userid}", $MOCK_GROUP_MEMBERS);

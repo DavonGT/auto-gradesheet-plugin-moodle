@@ -224,6 +224,28 @@ $T->assertEqual("SEPARATEGROUPS: admin with accessallgroups and no active group 
 $T->assertEqual("SEPARATEGROUPS: admin can open any section", roster_names(helper::get_non_teaching_students($ctx13, $gB)), ['Cruz, Carla', 'Dizon, Dan', 'Enriquez, Eva']);
 $T->assert("A group id from another course is always refused", !helper::check_group_access($ctx13, 1));
 
+// 13g-pre. Section helpers that drive the dashboard picker and the ZIP export.
+$MOCK_COURSE_GROUPMODE = NOGROUPS;
+$USER = (object)['id' => 1310];
+$MOCK_ACTIVE_GROUP = 0;
+$T->assertEqual("NOGROUPS: every group is an accessible section, in name order", array_values(array_map(function ($g) { return $g->name; }, helper::get_accessible_sections($ctx13))), ['BSCS 1A', 'BSCS 1B', 'BSCS 1C']);
+$T->assert("NOGROUPS: combined sheet allowed", helper::can_view_combined($ctx13));
+$T->assertEqual("Default section with no active group = first section (not the combined sheet)", helper::default_section($ctx13), $gA);
+$MOCK_ACTIVE_GROUP = $gB;
+$T->assertEqual("Default section follows the active group", helper::default_section($ctx13), $gB);
+$MOCK_ACTIVE_GROUP = 0;
+$MOCK_COURSE_GROUPMODE = SEPARATEGROUPS;
+$T->assertEqual("SEPARATEGROUPS: T1 only sees sections A and C", array_keys(helper::get_accessible_sections($ctx13)), [$gA, $gC]);
+$T->assert("SEPARATEGROUPS: T1 may not view the combined sheet", !helper::can_view_combined($ctx13));
+$USER = (object)['id' => 1312];
+$T->assertEqual("SEPARATEGROUPS: teacher in no group has no sections and default 0", [helper::get_accessible_sections($ctx13), helper::default_section($ctx13)], [[], 0]);
+$USER = (object)['id' => 1];
+$MOCK_CAPABILITIES["moodle/site:accessallgroups:1"] = true;
+$T->assertEqual("SEPARATEGROUPS: accessallgroups sees all three sections and the combined sheet", [count(helper::get_accessible_sections($ctx13)), helper::can_view_combined($ctx13)], [3, true]);
+$T->assertEqual("Ungrouped students are detected (Fe Flores only); staff never listed", roster_names(helper::get_ungrouped_students($ctx13)), ['Flores, Fe']);
+$DB->insert_record('course', (object)['id' => 1302, 'fullname' => 'No Groups', 'shortname' => 'NG']);
+$T->assertEqual("A course without groups has no sections and default 0", [helper::get_accessible_sections(context_course::instance(1302)), helper::default_section(context_course::instance(1302))], [[], 0]);
+
 // 13g. VISIBLEGROUPS: everyone may look at any section.
 $MOCK_COURSE_GROUPMODE = VISIBLEGROUPS;
 $USER = (object)['id' => 1310];

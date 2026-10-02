@@ -79,6 +79,10 @@ Page files (`index.php`, `export.php`, `export_excel.php`, `preview.php`) are th
 4. Preview the gradesheet.
 5. Export as PDF or Excel.
 
+## Sections (one grade sheet per section)
+
+A Moodle **group** is a section. When a course has groups, the dashboard shows a section picker (regardless of the course's group-mode setting), an "All sections at a glance" table with Preview / PDF / Excel buttons per section, and **Download every section as PDF (ZIP)** (`export_all.php`). Each section's sheet has its own roster, section label, schedule and instructor line (Settings → Per-Section Overrides); grading categories, weights and the formula are shared by all sections of the course. Students who belong to no group are flagged because they appear on no section sheet. Under *Separate groups* mode, teachers only see their own sections and cannot open the combined sheet.
+
 ## Configuration
 
 - Course-level settings: `course_settings.php` (all versions) or the Moodle course edit form (Moodle 4.4+ only; `\core_course\hook\after_form_definition` does not exist in 4.3, so on 4.3 the "Gradesheet Configuration" section simply does not appear in the course form — nothing else is affected).
