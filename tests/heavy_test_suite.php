@@ -15,6 +15,14 @@
  *  - Formula-based transmutation (safe expression evaluator, clamp, passmark, legend)
  *  - Signatory auto-detection from roles (instructor, dept head, registrar, dean)
  *  - Settings health check ("Needs attention" panel)
+ *  - Multi-section / multi-teacher roster matrix (NOGROUPS, VISIBLEGROUPS, SEPARATEGROUPS)
+ *  - Gradebook edge cases (grademax scaling, overrides, excluded/hidden grades, hidden categories,
+ *    stale gradebook regrade, non-numeric and total items, orphaned mappings, zero weights)
+ *  - Transmutation/legend matrix across ESSU table, legacy brackets and formula modes
+ *  - Formula evaluator exhaustive precedence/function/error coverage
+ *  - Status management, defaults/config bootstrap, event observers, role bootstrap
+ *  - Student self-view isolation
+ *  - End-to-end worked example with hand-computed expected values (thesis table)
  *  - Dynamic column whitelist injection resistance
  *  - Schema bounds & string truncation (OBS-03)
  *  - Roster computation service payload integrity
@@ -33,6 +41,32 @@ const GRADE_TYPE_SCALE = 2;
 const GRADE_TYPE_TEXT  = 3;
 const MUST_EXIST       = 1;
 const IGNORE_MISSING   = 2;
+const CONTEXT_SYSTEM   = 10;
+const CONTEXT_COURSECAT = 40;
+const CONTEXT_COURSE   = 50;
+const DEBUG_DEVELOPER  = 32767;
+
+// $CFG->libdir points at tests/stubs so helper's require_once of gradelib.php loads the stub.
+global $CFG;
+$CFG = (object)['libdir' => __DIR__ . '/stubs', 'dirroot' => __DIR__ . '/..'];
+$MOCK_REGRADE_CALLS = [];
+$MOCK_DEBUGGING = [];
+$MOCK_CONFIG = []; // plugin admin settings, e.g. ['local_gradesheet' => ['role_registrar' => 'univregistrar']]
+$MOCK_ROLE_CONTEXTLEVELS = [];
+function debugging($message = '', $level = DEBUG_DEVELOPER, $backtrace = null): bool {
+    global $MOCK_DEBUGGING;
+    $MOCK_DEBUGGING[] = $message;
+    return true;
+}
+function create_role($name, $shortname, $description, $archetype = '') {
+    global $DB;
+    return $DB->insert_record('role', (object)['name' => $name, 'shortname' => $shortname, 'description' => $description, 'archetype' => $archetype]);
+}
+function set_role_contextlevels($roleid, array $contextlevels) {
+    global $MOCK_ROLE_CONTEXTLEVELS;
+    $MOCK_ROLE_CONTEXTLEVELS[$roleid] = $contextlevels;
+}
+require_once __DIR__ . '/mock_core_events.php';
 
 // Global Moodle helpers
 function s($var): string {
@@ -85,7 +119,10 @@ function get_role_users($roleid, $context, $parent = false, $fields = '', $sort 
     }
     return $users;
 }
-function get_config($plugin, $name = null) { return ''; }
+function get_config($plugin, $name = null) {
+    global $MOCK_CONFIG;
+    return $MOCK_CONFIG[$plugin][$name] ?? '';
+}
 
 #[\AllowDynamicProperties]
 class grade_item {
@@ -96,9 +133,14 @@ class grade_item {
         }
     }
     public function is_hidden(): bool {
-        return !empty($this->hidden);
+        // Mirrors core: hidden == 1 means hidden; hidden > 1 is a "hidden until" timestamp.
+        return !empty($this->hidden) && ((int)$this->hidden == 1 || (int)$this->hidden > time());
     }
     public function get_parent_category() {
+        // Tests set 'parenthidden' on the grade item row to simulate a hidden Moodle grade category.
+        if (!empty($this->parenthidden)) {
+            return new class { public function is_hidden(): bool { return true; } };
+        }
         return null;
     }
 }
@@ -387,6 +429,11 @@ function get_enrolled_users(context_course $context, string $withcap = '', int $
         }
         $users[$u->id] = $u;
     }
+    if (stripos($sort, 'lastname') !== false) {
+        uasort($users, function ($a, $b) {
+            return [strtolower($a->lastname ?? ''), strtolower($a->firstname ?? '')] <=> [strtolower($b->lastname ?? ''), strtolower($b->firstname ?? '')];
+        });
+    }
     return $users;
 }
 function is_siteadmin($userid): bool {
@@ -401,9 +448,11 @@ require_once __DIR__ . '/../classes/formula.php';
 require_once __DIR__ . '/../classes/helper.php';
 require_once __DIR__ . '/../classes/hooks.php';
 require_once __DIR__ . '/../classes/gradesheet_service.php';
+require_once __DIR__ . '/../classes/observer.php';
 
 use local_gradesheet\helper;
 use local_gradesheet\formula;
+use local_gradesheet\observer;
 use local_gradesheet\hooks;
 use local_gradesheet\gradesheet_service;
 
@@ -429,6 +478,22 @@ class TestRunner {
         $cond = ($actual === $expected);
         $details = "Expected: " . var_export($expected, true) . ", Got: " . var_export($actual, true);
         $this->assert($desc, $cond, $details);
+    }
+
+    /** Asserts each key of $expected matches $actual, numeric values within $delta. */
+    public function assertRow(string $desc, array $actual, array $expected, float $delta = 0.01): void {
+        $bad = [];
+        foreach ($expected as $k => $v) {
+            $a = $actual[$k] ?? null;
+            if (is_float($v) || is_int($v)) {
+                if ($a === null || !is_numeric($a) || abs((float)$a - (float)$v) > $delta) {
+                    $bad[] = "$k: expected $v, got " . var_export($a, true);
+                }
+            } else if ($a !== $v) {
+                $bad[] = "$k: expected " . var_export($v, true) . ", got " . var_export($a, true);
+            }
+        }
+        $this->assert($desc, empty($bad), implode('; ', $bad));
     }
 
     public function assertDelta(string $desc, float $actual, float $expected, float $delta = 0.01): void {
@@ -1103,6 +1168,8 @@ helper::reset_caches();
 $issues = helper::settings_health($courseid_h);
 $texts  = array_map(function ($i) { return $i['level'] . '|' . $i['text']; }, $issues);
 $T->assert("Health: constant formula flagged", count(array_filter($texts, function ($t) { return strpos($t, 'warning|') === 0 && strpos($t, 'same grade') !== false; })) === 1);
+
+require __DIR__ . '/batteries_extended.php';
 
 // =========================================================================
 echo "\n======================================================================\n";

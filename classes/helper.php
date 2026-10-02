@@ -1035,8 +1035,11 @@ class helper {
         foreach ($categories as $cat) {
             $total += $cat->weight;
         }
+        // Compare on the rounded difference so 33.33 + 33.33 + 33.33 (99.99) is
+        // accepted: a raw float comparison makes 100 - 99.99 come out a hair
+        // above 0.01 and would block printing for a perfectly normal split.
         return [
-            'valid' => count($categories) > 0 && abs($total - 100) <= 0.01,
+            'valid' => count($categories) > 0 && round(abs($total - 100), 4) <= 0.01,
             'total' => round($total, 2),
             'count' => count($categories)
         ];

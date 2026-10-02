@@ -155,12 +155,12 @@ class formula {
         return $value;
     }
 
-    // term := power (('*' | '/' | '%') power)*
+    // term := unary (('*' | '/' | '%') unary)*
     private function parse_term(): float {
-        $value = $this->parse_power();
+        $value = $this->parse_unary();
         while (($t = $this->peek()) && $t[0] === 'op' && in_array($t[1], ['*', '/', '%'], true)) {
             $this->pos++;
-            $rhs = $this->parse_power();
+            $rhs = $this->parse_unary();
             if ($t[1] === '*') {
                 $value *= $rhs;
             } else {
@@ -173,18 +173,8 @@ class formula {
         return $value;
     }
 
-    // power := unary ('^' power)?   (right-associative)
-    private function parse_power(): float {
-        $base = $this->parse_unary();
-        if (($t = $this->peek()) && $t[0] === 'op' && $t[1] === '^') {
-            $this->pos++;
-            $exp = $this->parse_power();
-            return pow($base, $exp);
-        }
-        return $base;
-    }
-
-    // unary := ('-' | '+') unary | primary
+    // unary := ('-' | '+') unary | power
+    // Unary minus binds looser than '^' so that -2^2 = -4 (conventional).
     private function parse_unary(): float {
         $t = $this->peek();
         if ($t && $t[0] === 'op' && ($t[1] === '-' || $t[1] === '+')) {
@@ -192,7 +182,18 @@ class formula {
             $v = $this->parse_unary();
             return $t[1] === '-' ? -$v : $v;
         }
-        return $this->parse_primary();
+        return $this->parse_power();
+    }
+
+    // power := primary ('^' unary)?   (right-associative: 2^3^2 = 2^(3^2); 2^-1 allowed)
+    private function parse_power(): float {
+        $base = $this->parse_primary();
+        if (($t = $this->peek()) && $t[0] === 'op' && $t[1] === '^') {
+            $this->pos++;
+            $exp = $this->parse_unary();
+            return pow($base, $exp);
+        }
+        return $base;
     }
 
     // primary := number | P | '(' expression ')' | func '(' args ')'
