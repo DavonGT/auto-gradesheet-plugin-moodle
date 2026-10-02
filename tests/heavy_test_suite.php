@@ -12,6 +12,7 @@
  *  - Group isolation (SEPARATEGROUPS / IDOR prevention)
  *  - Computation rules (ungraded-as-zero, hidden items, midterm weight, rounding)
  *  - Custom scale equivalents and per-section header overrides
+ *  - Formula-based transmutation (safe expression evaluator, clamp, passmark, legend)
  *  - Dynamic column whitelist injection resistance
  *  - Schema bounds & string truncation (OBS-03)
  *  - Roster computation service payload integrity
@@ -345,11 +346,13 @@ function fullname($user): string {
 }
 
 // Require target plugin classes
+require_once __DIR__ . '/../classes/formula.php';
 require_once __DIR__ . '/../classes/helper.php';
 require_once __DIR__ . '/../classes/hooks.php';
 require_once __DIR__ . '/../classes/gradesheet_service.php';
 
 use local_gradesheet\helper;
+use local_gradesheet\formula;
 use local_gradesheet\hooks;
 use local_gradesheet\gradesheet_service;
 
@@ -811,6 +814,81 @@ $T->assertEqual("Section A roster contains only its member", count($exp_a['rows'
 $T->assertEqual("Section B roster contains only its member", count($exp_b['rows']), 1);
 helper::set_group_overrides($courseid_rules, $gid_b, ['courseandyear' => '', 'schedule' => '', 'instructor' => '']);
 $T->assert("Clearing all override fields deletes the row", !$DB->record_exists('local_gradesheet_groupcfg', ['courseid' => $courseid_rules, 'groupid' => $gid_b]));
+
+// =========================================================================
+echo "\n======================================================================\n";
+echo "BATTERY 10: Formula-Based Transmutation\n";
+echo "======================================================================\n";
+// 10a. Evaluator correctness and safety.
+$T->assertDelta("Evaluator: ESSU linear at P=100 -> 1.0", formula::evaluate('1 + (100 - P) * 0.08', 100), 1.0);
+$T->assertDelta("Evaluator: ESSU linear at P=75 -> 3.0",  formula::evaluate('1 + (100 - P) * 0.08', 75), 3.0);
+$T->assertDelta("Evaluator: ESSU linear at P=50 -> 5.0",  formula::evaluate('1 + (100 - P) * 0.08', 50), 5.0);
+$T->assertDelta("Evaluator: base-50 at P=90 -> 95",       formula::evaluate('50 + P / 2', 90), 95.0);
+$T->assertDelta("Evaluator: min()/max()/round() nest",     formula::evaluate('round(max(1, min(5, 1 + (100 - P) * 0.08)), 1)', 20), 5.0);
+$T->assertDelta("Evaluator: ^ is right-associative",       formula::evaluate('2 ^ 3 ^ 2', 0), 512.0);
+$T->assertDelta("Evaluator: unary minus",                  formula::evaluate('-P + 10', 4), 6.0);
+$T->assertDelta("Evaluator: P is case-insensitive, x/score aliases", formula::evaluate('p + x + score', 1), 3.0);
+$T->assertEqual("Validator: empty formula rejected",      formula::validate('') !== '', true);
+$T->assertEqual("Validator: unknown name rejected",       formula::validate('foo(P)') !== '', true);
+$T->assertEqual("Validator: PHP function names rejected", formula::validate('eval(P)') !== '', true);
+$T->assertEqual("Validator: division by zero rejected",   formula::validate('P / 0') !== '', true);
+$T->assertEqual("Validator: dangling operator rejected",  formula::validate('P +') !== '', true);
+$T->assertEqual("Validator: good formula accepted",       formula::validate('min(95, 50 + P / 2)'), '');
+
+// 10b. Course in formula mode: ESSU linear, clamped 1.0-5.0, 1 decimal, pass at 75.
+$courseid_f = 701;
+$DB->insert_record('course', (object)['id' => $courseid_f, 'fullname' => 'Formula Course', 'shortname' => 'FORM101']);
+$DB->insert_record('local_gradesheet_config', (object)[
+    'courseid' => $courseid_f, 'semester' => 'First Semester', 'schoolyear' => '2026-2027',
+    'coursenumber' => 'FORM101', 'descriptive' => 'Formula Course', 'courseandyear' => 'BSCS 3A',
+    'schedule' => 'MW', 'units' => '3', 'instructor' => 'X', 'department_head' => 'DH', 'registrar' => 'REG', 'college_dean' => 'DEAN',
+    'missingaszero' => 0, 'includehidden' => 1, 'midtermweight' => 50.0, 'roundaverage' => 0,
+    'transmutemode' => 'formula', 'formula' => '1 + (100 - P) * 0.08',
+    'formulamin' => 1.0, 'formulamax' => 5.0, 'formuladecimals' => 1, 'passmark' => 75.0,
+]);
+helper::reset_caches();
+$T->assertEqual("Formula mode: 100 -> '1.0'", helper::transmute_equiv(100, $courseid_f), '1.0');
+$T->assertEqual("Formula mode: 87.5 -> '2.0'", helper::transmute_equiv(87.5, $courseid_f), '2.0');
+$T->assertEqual("Formula mode: 75 -> '3.0'", helper::transmute_equiv(75, $courseid_f), '3.0');
+$T->assertEqual("Formula mode: 20 clamps to '5.0' (max)", helper::transmute_equiv(20, $courseid_f), '5.0');
+$T->assertEqual("Formula mode: 74.99 -> '3.0' (1 decimal)", helper::transmute_equiv(74.99, $courseid_f), '3.0');
+$T->assert("Formula mode: 75.0 passes (passmark)", helper::is_passing(75.0, $courseid_f));
+$T->assert("Formula mode: 74.99 fails (passmark)", !helper::is_passing(74.99, $courseid_f));
+$T->assertEqual("Formula mode: brackets absent -> default ESSU adjectival rating", helper::adjectival_rating(87.5, $courseid_f), 'Very Good');
+$legend_f = helper::get_rating_legend($courseid_f);
+$T->assertEqual("Formula mode legend: 99-90 equivalent computed from formula", $legend_f[1], ['99-90', '1.1-1.8', 'Excellent']);
+$T->assertEqual("Formula mode legend: 100 equivalent is single value", $legend_f[0][1], '1.0');
+$T->assert("Formula mode: legend has an Equivalent column", helper::legend_has_equivalent($courseid_f));
+
+// 10c. Brackets in formula mode only supply the adjectival rating, never the grade.
+$DB->insert_record('local_gradesheet_transmute', (object)['courseid' => $courseid_f, 'minscore' => 90, 'maxscore' => 100, 'equivalent' => '', 'descriptor' => 'Superior', 'sortorder' => 0, 'ispassing' => 1]);
+$DB->insert_record('local_gradesheet_transmute', (object)['courseid' => $courseid_f, 'minscore' => 0,  'maxscore' => 89.99, 'equivalent' => '', 'descriptor' => 'Ordinary', 'sortorder' => 1, 'ispassing' => 0]);
+helper::reset_caches();
+$T->assertEqual("Formula mode + brackets: grade still from formula (95 -> '1.4')", helper::transmute_equiv(95, $courseid_f), '1.4');
+$T->assertEqual("Formula mode + brackets: rating from bracket", helper::adjectival_rating(95, $courseid_f), 'Superior');
+$T->assert("Formula mode + brackets: passing ignores bracket ispassing, uses passmark (80 passes)", helper::is_passing(80.0, $courseid_f));
+$legend_f2 = helper::get_rating_legend($courseid_f);
+$T->assertEqual("Formula mode + brackets: legend equivalent computed at bracket ends", $legend_f2[0], ['100-90', '1.0-1.8', 'Superior']);
+
+// 10d. Percentage-style formula capped at 95 with 0 decimals and pass at 50 (base-50 preset).
+$cfg_f = $DB->get_record('local_gradesheet_config', ['courseid' => $courseid_f]);
+$cfg_f->formula = '50 + P / 2'; $cfg_f->formulamin = null; $cfg_f->formulamax = 95.0; $cfg_f->formuladecimals = 0; $cfg_f->passmark = 50.0;
+$DB->update_record('local_gradesheet_config', $cfg_f);
+helper::reset_caches();
+$T->assertEqual("Cap 95: P=100 -> '95'", helper::transmute_equiv(100, $courseid_f), '95');
+$T->assertEqual("Cap 95: P=90 -> '95'", helper::transmute_equiv(90, $courseid_f), '95');
+$T->assertEqual("Cap 95: P=60 -> '80'", helper::transmute_equiv(60, $courseid_f), '80');
+$T->assertEqual("Cap 95: P=0 -> '50'", helper::transmute_equiv(0, $courseid_f), '50');
+$T->assert("Cap 95: P=50 passes at passmark 50", helper::is_passing(50.0, $courseid_f));
+
+// 10e. Formula mode with an empty formula falls back to the built-in table instead of breaking.
+$cfg_f->formula = '';
+$DB->update_record('local_gradesheet_config', $cfg_f);
+helper::reset_caches();
+$T->assertEqual("Empty formula: falls back (brackets exist -> raw score)", helper::transmute_equiv(95, $courseid_f), '95.00');
+
+// 10f. Courses without the new columns (pre-upgrade rows) behave exactly as before.
+$T->assertEqual("Legacy config row: built-in ESSU table still used", helper::transmute_equiv(90.0, 601), '1.5');
 
 // =========================================================================
 echo "\n======================================================================\n";

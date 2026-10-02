@@ -195,7 +195,7 @@ if ($courseid) {
                     <span class="grade-label">Final Average</span>
                     <span class="grade-value">' . ($grades['average'] === null ? '—' : number_format($grades['average'], 2)) . '</span>
                   </div>';
-            $is_custom = helper::get_custom_transmute_rows($courseid) ? true : false;
+            $is_custom = !helper::legend_has_equivalent($courseid);
             if (!$is_custom) {
                 echo '<div class="grade-row" class="grade-row-highlight">
                         <span class="grade-label">Transmuted Grade</span>
@@ -292,6 +292,17 @@ if ($courseid) {
         $rulesparts[] = 'Final average: <strong>' . rtrim(rtrim(number_format($rules['midtermweight'], 2), '0'), '.') . '% Midterm / '
             . rtrim(rtrim(number_format(100 - $rules['midtermweight'], 2), '0'), '.') . '% Finals</strong>';
         $rulesparts[] = 'Rounding before transmutation: <strong>' . ($rules['roundaverage'] ? 'whole number' : 'none') . '</strong>';
+        $fs = helper::get_formula_settings($courseid);
+        if ($fs['mode'] === 'formula') {
+            $clamp = [];
+            if ($fs['min'] !== null) { $clamp[] = 'min ' . rtrim(rtrim(number_format($fs['min'], 2, '.', ''), '0'), '.'); }
+            if ($fs['max'] !== null) { $clamp[] = 'max ' . rtrim(rtrim(number_format($fs['max'], 2, '.', ''), '0'), '.'); }
+            $rulesparts[] = 'Transmutation: <strong><code>' . s($fs['formula']) . '</code></strong>'
+                . ($clamp ? ' (' . implode(', ', $clamp) . ')' : '')
+                . ', pass at <strong>' . rtrim(rtrim(number_format($fs['passmark'], 2, '.', ''), '0'), '.') . '%</strong>';
+        } else {
+            $rulesparts[] = 'Transmutation: <strong>built-in ESSU table</strong>';
+        }
         echo helper::render_alert(implode(' &middot; ', $rulesparts), 'secondary', '&#8505;',
             $canmanage ? '<a href="course_settings.php?courseid=' . $courseid . '#computation-rules" class="btn btn-light btn-sm">Change</a>' : '');
 
@@ -370,7 +381,7 @@ if ($courseid) {
         // Summary tab: what goes on the official sheet.
         echo '<th data-gs-period="summary" title="Graded items / mapped items">Graded</th>';
         echo '<th data-gs-period="summary">Midterm</th><th data-gs-period="summary">Finals</th>';
-        echo '<th data-gs-period="summary">Average</th><th data-gs-period="summary">Remarks</th>';
+        echo '<th data-gs-period="summary">Average</th><th data-gs-period="summary">Rating</th><th data-gs-period="summary">Remarks</th>';
         echo '<th>Status</th>';
         echo '</tr></thead>';
         echo '<tbody>';
@@ -402,7 +413,7 @@ if ($courseid) {
                         echo '<td data-gs-period="' . $pk . '">-</td>';
                     }
                 }
-                for ($c = 0; $c < 4; $c++) {
+                for ($c = 0; $c < 5; $c++) {
                     echo '<td data-gs-period="summary">-</td>';
                 }
                 echo '<td data-gs-period="summary"><span class="badge badge-secondary">' . s(helper::status_label($curstatus)) . '</span></td>';
@@ -457,6 +468,7 @@ if ($courseid) {
                 echo '<td data-gs-period="summary">' . s(helper::transmute_equiv($g['finals'], $courseid)) . '</td>';
                 echo '<td data-gs-period="summary"><strong>' . s($g['transmuted']) . '</strong>'
                     . ($g['average'] === null ? '' : ' <small class="text-muted">(' . number_format($g['average'], 2) . '%)</small>') . '</td>';
+                echo '<td data-gs-period="summary">' . ($g['average'] === null ? '-' : s(helper::adjectival_rating($g['average'], $courseid))) . '</td>';
                 echo '<td data-gs-period="summary"><span class="badge ' . $badgeclass . '">' . ($hasdata ? s($g['remarks']) : '-') . '</span></td>';
             }
 

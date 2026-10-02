@@ -95,6 +95,47 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             'Computation rules saved!', null, \core\output\notification::NOTIFY_SUCCESS);
     }
 
+    // Save transmutation formula
+    if ($action === 'saveformula') {
+        $formulaurl = new moodle_url('/local/gradesheet/course_settings.php', ['courseid' => $courseid], 'transmutation-formula');
+        helper::ensure_course_defaults($courseid);
+        $existing = $DB->get_record('local_gradesheet_config', ['courseid' => $courseid], '*', MUST_EXIST);
+
+        $mode     = optional_param('transmutemode', 'essu', PARAM_ALPHA) === 'formula' ? 'formula' : 'essu';
+        $formulat = trim(optional_param('formula', '', PARAM_RAW_TRIMMED));
+        $fmin     = trim(optional_param('formulamin', '', PARAM_RAW_TRIMMED));
+        $fmax     = trim(optional_param('formulamax', '', PARAM_RAW_TRIMMED));
+        $decimals = optional_param('formuladecimals', 1, PARAM_INT);
+        $passmark = optional_param('passmark', 75, PARAM_FLOAT);
+
+        if ($mode === 'formula') {
+            $err = \local_gradesheet\formula::validate($formulat);
+            if ($err !== '') {
+                redirect($formulaurl, 'Formula not saved: ' . $err, null, \core\output\notification::NOTIFY_ERROR);
+            }
+        }
+        if (($fmin !== '' && !is_numeric($fmin)) || ($fmax !== '' && !is_numeric($fmax))) {
+            redirect($formulaurl, 'Minimum and maximum grade must be numbers (or left blank).', null, \core\output\notification::NOTIFY_ERROR);
+        }
+        if ($fmin !== '' && $fmax !== '' && floatval($fmin) > floatval($fmax)) {
+            redirect($formulaurl, 'Minimum grade cannot be greater than the maximum grade.', null, \core\output\notification::NOTIFY_ERROR);
+        }
+        if ($passmark < 0 || $passmark > 100) {
+            redirect($formulaurl, 'Passing mark must be between 0 and 100.', null, \core\output\notification::NOTIFY_ERROR);
+        }
+
+        $existing->transmutemode   = $mode;
+        $existing->formula         = mb_substr($formulat, 0, 255);
+        $existing->formulamin      = ($fmin === '') ? null : round(floatval($fmin), 2);
+        $existing->formulamax      = ($fmax === '') ? null : round(floatval($fmax), 2);
+        $existing->formuladecimals = max(0, min(2, $decimals));
+        $existing->passmark        = round($passmark, 2);
+        $existing->timemodified    = time();
+        $DB->update_record('local_gradesheet_config', $existing);
+        helper::reset_caches();
+        redirect($formulaurl, 'Transmutation settings saved!', null, \core\output\notification::NOTIFY_SUCCESS);
+    }
+
     // Save per-section (group) header overrides
     if ($action === 'savegroupcfg') {
         $gid = required_param('groupid', PARAM_INT);
@@ -277,6 +318,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 // ── LOAD DATA ─────────────────────────────────────────────────────────────────
 $config     = $DB->get_record('local_gradesheet_config', ['courseid' => $courseid]);
 $rules      = helper::get_computation_rules($courseid);
+$fs         = helper::get_formula_settings($courseid);
+$presets    = helper::formula_presets();
+// Preview of the active formula at representative raw percentages.
+$previewpoints = [100, 95, 90, 85, 80, 75, 74, 70, 60, 50, 0];
 $coursegroups = groups_get_all_groups($courseid);
 $groupcfgs  = [];
 foreach ($DB->get_records('local_gradesheet_groupcfg', ['courseid' => $courseid]) as $gc) {
@@ -689,16 +734,132 @@ echo '<div class="local-gradesheet-page">';
         </div>
     </div>
 
-    <!-- SECTION 4: Grading Scale / Transmutation -->
-    <div class="card mb-4" id="grading-scale">
+    <!-- SECTION 4a: Transmutation Formula -->
+    <div class="card mb-4" id="transmutation-formula">
         <div class="card-header bg-dark text-white">
-            <strong>Grading Scale / Transmutation</strong>
+            <strong>Transmutation Formula (Percentage &rarr; Grade)</strong>
         </div>
         <div class="card-body">
             <p class="text-muted">
-                By default this course uses ESSU's standard transmutation table. Add brackets below to define
-                your own scale instead — for example, if the college uses a different equivalent-rating system.
-                Brackets are matched by the student's numeric average (0–100) falling between Min and Max.
+                This is the formula the plugin uses to turn a student's raw percentage <code>P</code> (0&ndash;100) into
+                the grade printed on the sheet. Write it as an arithmetic expression in <code>P</code>; the result is
+                clamped to the minimum/maximum below and rounded to the chosen decimals.
+                Allowed: <code>+ - * / ^ ( )</code> and <code>min() max() round() floor() ceil() abs() sqrt()</code>.
+            </p>
+            <form method="post" id="formulaForm">
+                <input type="hidden" name="action" value="saveformula">
+                <input type="hidden" name="sesskey" value="<?php echo sesskey(); ?>">
+
+                <div class="form-group row mb-3">
+                    <label class="col-sm-3 col-form-label"><strong>Method</strong></label>
+                    <div class="col-sm-9">
+                        <div class="form-check">
+                            <input class="form-check-input" type="radio" name="transmutemode" id="mode_formula" value="formula" <?php echo $fs['mode'] === 'formula' ? 'checked' : ''; ?>>
+                            <label class="form-check-label" for="mode_formula"><strong>Formula</strong> &mdash; computed from the expression below (recommended)</label>
+                        </div>
+                        <div class="form-check">
+                            <input class="form-check-input" type="radio" name="transmutemode" id="mode_essu" value="essu" <?php echo $fs['mode'] !== 'formula' ? 'checked' : ''; ?>>
+                            <label class="form-check-label" for="mode_essu"><strong>Built-in ESSU table</strong> &mdash; interpolates inside the registrar's rating brackets (legacy)</label>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="form-group row mb-2">
+                    <label class="col-sm-3 col-form-label" for="formula"><strong>Formula</strong></label>
+                    <div class="col-sm-9">
+                        <input type="text" class="form-control font-monospace" style="font-family:monospace" id="formula" name="formula" maxlength="255"
+                               placeholder="e.g. 1 + (100 - P) * 0.08" value="<?php echo s($fs['formula']); ?>">
+                        <small class="form-text text-muted">
+                            Presets:
+                            <?php foreach ($presets as $pk => $pr): ?>
+                                <a href="#" class="badge badge-light border" onclick="gsApplyPreset('<?php echo $pk; ?>'); return false;"><?php echo s($pr['label']); ?></a>
+                            <?php endforeach; ?>
+                        </small>
+                    </div>
+                </div>
+
+                <div class="form-group row mb-2">
+                    <label class="col-sm-3 col-form-label"><strong>Clamp result</strong></label>
+                    <div class="col-sm-3">
+                        <input type="text" class="form-control" name="formulamin" id="formulamin" placeholder="min (blank = none)"
+                               value="<?php echo $fs['min'] === null ? '' : s(rtrim(rtrim(number_format($fs['min'], 2, '.', ''), '0'), '.')); ?>">
+                    </div>
+                    <div class="col-sm-3">
+                        <input type="text" class="form-control" name="formulamax" id="formulamax" placeholder="max (blank = none)"
+                               value="<?php echo $fs['max'] === null ? '' : s(rtrim(rtrim(number_format($fs['max'], 2, '.', ''), '0'), '.')); ?>">
+                    </div>
+                    <div class="col-sm-3 col-form-label"><small class="text-muted">e.g. max 95 so nobody prints above 95</small></div>
+                </div>
+
+                <div class="form-group row mb-2">
+                    <label class="col-sm-3 col-form-label" for="formuladecimals"><strong>Decimals shown</strong></label>
+                    <div class="col-sm-3">
+                        <select class="form-control" name="formuladecimals" id="formuladecimals">
+                            <?php foreach ([0, 1, 2] as $d): ?>
+                                <option value="<?php echo $d; ?>" <?php echo $fs['decimals'] === $d ? 'selected' : ''; ?>><?php echo $d; ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
+                    <label class="col-sm-3 col-form-label text-sm-right" for="passmark"><strong>Passing mark (raw %)</strong></label>
+                    <div class="col-sm-3">
+                        <input type="number" step="0.01" min="0" max="100" class="form-control" name="passmark" id="passmark"
+                               value="<?php echo s(rtrim(rtrim(number_format($fs['passmark'], 2, '.', ''), '0'), '.')); ?>" required>
+                    </div>
+                </div>
+
+                <?php if ($fs['mode'] === 'formula'): ?>
+                <div class="mt-3">
+                    <h6 class="mb-2"><strong>Preview of the saved formula</strong> <code><?php echo s($fs['formula']); ?></code></h6>
+                    <div class="table-responsive">
+                    <table class="table table-sm table-bordered mb-2 text-center" style="max-width:900px">
+                        <thead class="thead-light">
+                            <tr><th class="text-left">Raw %</th><?php foreach ($previewpoints as $pp): ?><th><?php echo $pp; ?></th><?php endforeach; ?></tr>
+                        </thead>
+                        <tbody>
+                            <tr><th class="text-left">Grade</th>
+                                <?php foreach ($previewpoints as $pp): ?>
+                                    <td><strong><?php echo s(helper::transmute_equiv($pp, $courseid)); ?></strong></td>
+                                <?php endforeach; ?>
+                            </tr>
+                            <tr><th class="text-left">Remarks</th>
+                                <?php foreach ($previewpoints as $pp): ?>
+                                    <td><?php echo helper::is_passing((float)$pp, $courseid) ? '<span class="badge badge-success">Pass</span>' : '<span class="badge badge-danger">Fail</span>'; ?></td>
+                                <?php endforeach; ?>
+                            </tr>
+                            <tr><th class="text-left">Rating</th>
+                                <?php foreach ($previewpoints as $pp): ?>
+                                    <td><small><?php echo s(helper::adjectival_rating($pp, $courseid)); ?></small></td>
+                                <?php endforeach; ?>
+                            </tr>
+                        </tbody>
+                    </table>
+                    </div>
+                </div>
+                <?php else: ?>
+                    <?php echo \local_gradesheet\helper::render_alert("Currently using the <strong>built-in ESSU table</strong>. Pick <strong>Formula</strong>, enter or choose a preset, and save to switch.", "secondary"); ?>
+                <?php endif; ?>
+
+                <button type="submit" class="btn btn-primary mt-2">Save Transmutation Settings</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- SECTION 4b: Adjectival rating brackets (legend) -->
+    <div class="card mb-4" id="grading-scale">
+        <div class="card-header bg-dark text-white">
+            <strong>Rating Brackets (Adjectival Legend)</strong>
+        </div>
+        <div class="card-body">
+            <p class="text-muted">
+                <?php if ($fs['mode'] === 'formula'): ?>
+                    In Formula mode these brackets <strong>do not compute grades</strong>. They supply the
+                    <em>Adjectival Rating</em> (Outstanding, Excellent, &hellip;) for each raw-percentage range and the legend
+                    printed on the sheet; the Equivalent column is filled from your formula automatically when left blank.
+                    Leave the table empty to use ESSU's standard ranges.
+                <?php else: ?>
+                    By default this course uses ESSU's standard transmutation table. Add brackets below to define
+                    your own scale instead; brackets are matched by the student's numeric average (0&ndash;100) falling between Min and Max.
+                <?php endif; ?>
             </p>
 
             <?php if ($usingcustomscale): ?>
@@ -810,7 +971,9 @@ echo '<div class="local-gradesheet-page">';
                 <input type="hidden" name="action" value="addtransmute">
                 <input type="hidden" name="sesskey" value="<?php echo sesskey(); ?>">
                 <h6><strong>+ Add Bracket</strong></h6>
-                <p class="text-muted small">Adding your first bracket switches this course to a custom scale.</p>
+                <p class="text-muted small"><?php echo $fs['mode'] === 'formula'
+                    ? 'Brackets only define ranges and their adjectival rating. Equivalent is optional (computed from the formula when blank).'
+                    : 'Adding your first bracket switches this course to a custom scale.'; ?></p>
                 <div class="form-row align-items-end">
                     <div class="col-md-3">
                         <label><strong>Min Score</strong></label>
@@ -844,6 +1007,17 @@ echo '<div class="local-gradesheet-page">';
 </div>
 
 <script>
+var gsFormulaPresets = <?php echo json_encode($presets); ?>;
+function gsApplyPreset(key) {
+    var p = gsFormulaPresets[key];
+    if (!p) { return; }
+    document.getElementById('mode_formula').checked = true;
+    document.getElementById('formula').value = p.formula;
+    document.getElementById('formulamin').value = p.min;
+    document.getElementById('formulamax').value = p.max;
+    document.getElementById('formuladecimals').value = String(p.decimals);
+    document.getElementById('passmark').value = p.passmark;
+}
 function toggleEditCategory(catId, showEdit) {
     var viewRow = document.getElementById('cat-view-' + catId);
     var editRow = document.getElementById('cat-edit-' + catId);

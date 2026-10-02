@@ -140,7 +140,7 @@ foreach ($infoData as $r => [$label, $val]) {
     $sheet->getStyle('B' . $r)->getFont()->setBold(true);
 }
 
-$is_custom = helper::get_custom_transmute_rows($courseid) ? true : false;
+$is_custom = !helper::legend_has_equivalent($courseid);
 $legend = $is_custom 
     ? [['Actual Rating', 'Adjectival Rating']] 
     : [['Actual Rating', 'Equivalent Rating', 'Adjectival Rating']];

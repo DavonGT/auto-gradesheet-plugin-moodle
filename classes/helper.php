@@ -117,6 +117,12 @@ class helper {
                 'includehidden'   => 1,
                 'midtermweight'   => 50,
                 'roundaverage'    => 0,
+                'transmutemode'   => 'essu',
+                'formula'         => '',
+                'formulamin'      => null,
+                'formulamax'      => null,
+                'formuladecimals' => 1,
+                'passmark'        => 75,
             ];
             $configdata->id = $DB->insert_record('local_gradesheet_config', $configdata);
             $config = $configdata;
@@ -166,6 +172,14 @@ class helper {
         $grade = floatval($grade);
 
         if ($courseid) {
+            // Formula mode: percentage -> transmuted value by the faculty's
+            // own expression. Brackets are then only the adjectival legend.
+            $fs = self::get_formula_settings($courseid);
+            if ($fs['mode'] === 'formula') {
+                $v = self::apply_formula($grade, $fs);
+                return ($v === null) ? '-' : number_format($v, $fs['decimals']);
+            }
+
             $custom = self::get_custom_transmute_rows($courseid);
             if (!empty($custom)) {
                 foreach ($custom as $row) {
@@ -208,6 +222,130 @@ class helper {
         return '5.0';
     }
 
+    /** Per-request cache of formula settings, keyed by course id. */
+    private static $formulacache = [];
+
+    /** Built-in presets offered on the settings page. */
+    public static function formula_presets(): array {
+        return [
+            'essu_linear' => [
+                'label'    => 'ESSU 1.0-5.0, linear (100 -> 1.0, 75 -> 3.0, 50 -> 5.0)',
+                'formula'  => '1 + (100 - P) * 0.08',
+                'min'      => '1', 'max' => '5', 'decimals' => 1, 'passmark' => '75',
+            ],
+            'base50_cap95' => [
+                'label'    => 'Base-50 percentage, capped at 95 (0 -> 50, 50 -> 75, 90+ -> 95)',
+                'formula'  => '50 + P / 2',
+                'min'      => '', 'max' => '95', 'decimals' => 0, 'passmark' => '50',
+            ],
+            'raw_cap95' => [
+                'label'    => 'Raw percentage, capped at 95',
+                'formula'  => 'P',
+                'min'      => '', 'max' => '95', 'decimals' => 0, 'passmark' => '75',
+            ],
+        ];
+    }
+
+    /**
+     * Transmutation settings for a course.
+     *
+     * @return array{mode:string, formula:string, min:?float, max:?float, decimals:int, passmark:float}
+     */
+    public static function get_formula_settings(int $courseid): array {
+        global $DB;
+        if (!isset(self::$formulacache[$courseid])) {
+            $config = $DB->get_record('local_gradesheet_config', ['courseid' => $courseid]);
+            $mode = ($config && isset($config->transmutemode)) ? (string)$config->transmutemode : 'essu';
+            $formula = ($config && isset($config->formula)) ? trim((string)$config->formula) : '';
+            if ($mode === 'formula' && $formula === '') {
+                $mode = 'essu'; // Nothing to evaluate: fall back safely.
+            }
+            $dec = ($config && isset($config->formuladecimals)) ? (int)$config->formuladecimals : 1;
+            self::$formulacache[$courseid] = [
+                'mode'     => $mode,
+                'formula'  => $formula,
+                'min'      => ($config && isset($config->formulamin) && $config->formulamin !== null && $config->formulamin !== '') ? floatval($config->formulamin) : null,
+                'max'      => ($config && isset($config->formulamax) && $config->formulamax !== null && $config->formulamax !== '') ? floatval($config->formulamax) : null,
+                'decimals' => max(0, min(2, $dec)),
+                'passmark' => ($config && isset($config->passmark)) ? floatval($config->passmark) : 75.0,
+            ];
+        }
+        return self::$formulacache[$courseid];
+    }
+
+    /**
+     * Evaluates the course formula at P = $grade, applies the min/max clamp
+     * and the configured rounding. Null when the formula cannot be evaluated.
+     */
+    public static function apply_formula(float $grade, array $fs): ?float {
+        try {
+            $v = formula::evaluate($fs['formula'], $grade);
+        } catch (\Throwable $e) {
+            return null;
+        }
+        if ($fs['max'] !== null && $v > $fs['max']) {
+            $v = $fs['max'];
+        }
+        if ($fs['min'] !== null && $v < $fs['min']) {
+            $v = $fs['min'];
+        }
+        return round($v, $fs['decimals']);
+    }
+
+    /**
+     * Adjectival rating (descriptor) for a raw percentage, looked up in the
+     * course's bracket table or, without one, the default ESSU legend. This is
+     * what the brackets are for in formula mode.
+     */
+    public static function adjectival_rating($grade, ?int $courseid = null): string {
+        if ($grade === null || $grade === '' || !is_numeric($grade)) {
+            return '';
+        }
+        $grade = floatval($grade);
+        if ($courseid) {
+            $custom = self::get_custom_transmute_rows($courseid);
+            if (!empty($custom)) {
+                foreach ($custom as $row) {
+                    if ($grade >= $row->minscore && $grade <= $row->maxscore) {
+                        return (string)$row->descriptor;
+                    }
+                }
+                return '';
+            }
+        }
+        // Default ESSU legend, by raw percentage.
+        $bands = [[100, 'Outstanding'], [90, 'Excellent'], [85, 'Very Good'], [80, 'Good'],
+                  [75, 'Fair'], [70, 'Conditional'], [0, 'Failed']];
+        foreach ($bands as [$min, $label]) {
+            if ($grade >= $min) {
+                return $label;
+            }
+        }
+        return 'Failed';
+    }
+
+    /**
+     * Whether the printed legend should carry an "Equivalent Rating" column.
+     * True in formula mode (equivalents are computed from the formula), true
+     * for the default ESSU scale, and true for legacy custom brackets only when
+     * at least one bracket has an equivalent filled in.
+     */
+    public static function legend_has_equivalent(int $courseid): bool {
+        if (self::get_formula_settings($courseid)['mode'] === 'formula') {
+            return true;
+        }
+        $custom = self::get_custom_transmute_rows($courseid);
+        if (empty($custom)) {
+            return true;
+        }
+        foreach ($custom as $row) {
+            if (trim((string)$row->equivalent) !== '') {
+                return true;
+            }
+        }
+        return false;
+    }
+
     /**
      * Returns custom transmutation brackets for a course, ordered high-to-low.
      * Cached per request so a full roster computation hits the table once.
@@ -234,6 +372,10 @@ class helper {
      */
     public static function is_passing(float $grade, ?int $courseid = null): bool {
         if ($courseid) {
+            $fs = self::get_formula_settings($courseid);
+            if ($fs['mode'] === 'formula') {
+                return $grade >= $fs['passmark'];
+            }
             $custom = self::get_custom_transmute_rows($courseid);
             if (!empty($custom)) {
                 foreach ($custom as $row) {
@@ -303,6 +445,7 @@ class helper {
     /** Clears per-request caches after settings are saved. */
     public static function reset_caches(): void {
         self::$rulescache = [];
+        self::$formulacache = [];
         self::$transmutecache = [];
         self::$course_grade_data = [];
     }
@@ -780,6 +923,25 @@ class helper {
      * @param int|null $courseid Course to check for a custom scale. Null = always default.
      */
     public static function get_rating_legend(?int $courseid = null): array {
+        $fs = $courseid ? self::get_formula_settings($courseid) : ['mode' => 'essu'];
+        $informula = ($fs['mode'] === 'formula');
+
+        // Equivalent shown for a legend range: the stored value, or in formula
+        // mode the formula evaluated at both ends of the range.
+        $equivfor = function (float $lo, float $hi, string $stored) use ($fs, $informula): string {
+            if (trim($stored) !== '' || !$informula) {
+                return $stored;
+            }
+            $a = self::apply_formula($hi, $fs);
+            $b = self::apply_formula($lo, $fs);
+            if ($a === null || $b === null) {
+                return '';
+            }
+            $fa = number_format($a, $fs['decimals']);
+            $fb = number_format($b, $fs['decimals']);
+            return ($fa === $fb) ? $fa : $fa . '-' . $fb;
+        };
+
         if ($courseid) {
             $custom = self::get_custom_transmute_rows($courseid);
             if (!empty($custom)) {
@@ -788,10 +950,27 @@ class helper {
                     $range = ($row->minscore == $row->maxscore)
                         ? self::format_score($row->minscore)
                         : self::format_score($row->maxscore) . '-' . self::format_score($row->minscore);
-                    $legend[] = [$range, $row->equivalent, $row->descriptor];
+                    $legend[] = [$range, $equivfor((float)$row->minscore, (float)$row->maxscore, (string)$row->equivalent), $row->descriptor];
                 }
                 return $legend;
             }
+        }
+
+        if ($informula) {
+            // Default ESSU ranges as the adjectival legend, equivalents from the formula.
+            return [
+                ['100',   $equivfor(100, 100, ''), 'Outstanding'],
+                ['99-90', $equivfor(90, 99, ''),   'Excellent'],
+                ['89-85', $equivfor(85, 89, ''),   'Very Good'],
+                ['84-80', $equivfor(80, 84, ''),   'Good'],
+                ['79-75', $equivfor(75, 79, ''),   'Fair'],
+                ['74-70', $equivfor(70, 74, ''),   'Conditional'],
+                ['69-0',  $equivfor(0, 69, ''),    'Failed'],
+                ['INC',   'INC',     'Incomplete'],
+                ['Dr',    'Dr',      'Dropped'],
+                ['WP',    'WP',      'Withdrawn w/ permission'],
+                ['IP',    'IP',      'In Progress'],
+            ];
         }
 
         return [

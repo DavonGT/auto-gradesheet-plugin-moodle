@@ -177,5 +177,24 @@ function xmldb_local_gradesheet_upgrade($oldversion) {
         upgrade_plugin_savepoint(true, 2026100200, 'local', 'gradesheet');
     }
 
+    if ($oldversion < 2026100300) {
+        // Formula-based transmutation (brackets become the adjectival legend only).
+        $table = new xmldb_table('local_gradesheet_config');
+        $fields = [
+            new xmldb_field('transmutemode',   XMLDB_TYPE_CHAR,    '20',    null, XMLDB_NOTNULL, null, 'essu', 'roundaverage'),
+            new xmldb_field('formula',         XMLDB_TYPE_CHAR,    '255',   null, null,          null, '',     'transmutemode'),
+            new xmldb_field('formulamin',      XMLDB_TYPE_NUMBER,  '10, 2', null, null,          null, null,   'formula'),
+            new xmldb_field('formulamax',      XMLDB_TYPE_NUMBER,  '10, 2', null, null,          null, null,   'formulamin'),
+            new xmldb_field('formuladecimals', XMLDB_TYPE_INTEGER, '1',     null, XMLDB_NOTNULL, null, '1',    'formulamax'),
+            new xmldb_field('passmark',        XMLDB_TYPE_NUMBER,  '5, 2',  null, XMLDB_NOTNULL, null, '75',   'formuladecimals'),
+        ];
+        foreach ($fields as $field) {
+            if (!$dbman->field_exists($table, $field)) {
+                $dbman->add_field($table, $field);
+            }
+        }
+        upgrade_plugin_savepoint(true, 2026100300, 'local', 'gradesheet');
+    }
+
     return true;
 }

@@ -157,7 +157,7 @@ foreach ($pages as $pageindex => $pagerows) {
     $pdf->SetX(15); $pdf->Cell(40, 5, 'Number of Units :', 0, 0);
     $pdf->Cell(0, 5, $units, 0, 1);
 
-    $is_custom = helper::get_custom_transmute_rows($courseid) ? true : false;
+    $is_custom = !helper::legend_has_equivalent($courseid);
     $legendX = $is_custom ? 145 : 120;
     $pdf->SetXY($legendX, $infoY);
     $pdf->SetFont('helvetica', 'B', 7);
