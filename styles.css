@@ -403,3 +403,99 @@
     font-weight: 400;
     opacity: 0.8;
 }
+
+/* ── Guided setup: step navigation on the settings page ─────────────────── */
+.local-gradesheet-page .gs-stepnav {
+    position: sticky;
+    top: 0;
+    z-index: 5;
+    background: #fff;
+    border: 1px solid #dee2e6;
+    border-radius: .35rem;
+    padding: .5rem .75rem;
+    margin-bottom: 1.25rem;
+    box-shadow: 0 2px 6px rgba(0,0,0,.05);
+}
+.local-gradesheet-page .gs-stepnav-title { margin-bottom: .35rem; }
+.local-gradesheet-page .gs-stepnav-list {
+    list-style: none;
+    display: flex;
+    flex-wrap: wrap;
+    gap: .35rem;
+    padding: 0;
+    margin: 0;
+}
+.local-gradesheet-page .gs-step a {
+    display: inline-flex;
+    align-items: center;
+    gap: .4rem;
+    padding: .3rem .6rem;
+    border-radius: 2rem;
+    border: 1px solid #ced4da;
+    background: #f8f9fa;
+    color: #343a40;
+    text-decoration: none;
+    font-size: .9rem;
+}
+.local-gradesheet-page .gs-step a:hover { background: #e9ecef; }
+.local-gradesheet-page .gs-step-num {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 1.4rem; height: 1.4rem; border-radius: 50%;
+    background: #343a40; color: #fff; font-size: .75rem; font-weight: 700;
+}
+.local-gradesheet-page .gs-step-icon { font-weight: 700; }
+.local-gradesheet-page .gs-step-ok .gs-step-icon,
+.local-gradesheet-page .gs-step-info .gs-step-icon { color: #28a745; }
+.local-gradesheet-page .gs-step-warning a { border-color: #ffc107; background: #fff8e1; }
+.local-gradesheet-page .gs-step-warning .gs-step-icon { color: #e0a800; }
+.local-gradesheet-page .gs-step-danger a { border-color: #dc3545; background: #fdecea; }
+.local-gradesheet-page .gs-step-danger .gs-step-icon,
+.local-gradesheet-page .gs-step-danger .gs-step-num { color: #fff; }
+.local-gradesheet-page .gs-step-danger .gs-step-num { background: #dc3545; }
+
+/* Card headers carry the step number and a plain-language blurb. */
+.local-gradesheet-page .gs-step-badge {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 1.6rem; height: 1.6rem; border-radius: 50%;
+    background: #fff; color: #343a40; font-weight: 700; font-size: .85rem;
+    margin-right: .5rem; vertical-align: middle;
+}
+.local-gradesheet-page .gs-step-badge-sub { width: auto; padding: 0 .45rem; border-radius: 1rem; }
+.local-gradesheet-page .gs-step-blurb {
+    font-weight: 400; font-size: .85rem; opacity: .85; margin-top: .25rem;
+}
+.local-gradesheet-page .gs-step-next { margin-top: 1rem; padding-top: .75rem; border-top: 1px dashed #dee2e6; }
+.local-gradesheet-page .card[id] { scroll-margin-top: 90px; }   /* don't hide under the sticky nav */
+
+/* Mapping helpers */
+.local-gradesheet-page .gs-bulk-tools { gap: .25rem; }
+.local-gradesheet-page .gs-mapping-table tr.table-warning td { background-color: #fff3cd; }
+
+/* ── Dashboard ──────────────────────────────────────────────────────────── */
+.local-gradesheet-page .gs-getting-started { border-left: 4px solid #0d6efd; }
+.local-gradesheet-page .gs-checklist { list-style: none; padding-left: 0; margin-bottom: .75rem; }
+.local-gradesheet-page .gs-checklist li { display: flex; align-items: baseline; gap: .5rem; padding: .2rem 0; }
+.local-gradesheet-page .gs-checklist .gs-check {
+    display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto;
+    width: 1.5rem; height: 1.5rem; border-radius: 50%; font-size: .8rem; font-weight: 700;
+    background: #e9ecef; color: #495057;
+}
+.local-gradesheet-page .gs-checklist li.done .gs-check { background: #28a745; color: #fff; }
+.local-gradesheet-page .gs-checklist li.done a { color: #6c757d; text-decoration: line-through; }
+.local-gradesheet-page .gs-details { font-size: .9rem; }
+.local-gradesheet-page .gs-details summary { cursor: pointer; color: #0d6efd; outline: none; }
+.local-gradesheet-page .gs-details[open] summary { margin-bottom: .4rem; }
+.local-gradesheet-page .gs-actions { display: flex; flex-wrap: wrap; gap: .4rem; align-items: center; }
+.local-gradesheet-page .gs-help {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 1rem; height: 1rem; border-radius: 50%; font-size: .65rem; font-weight: 700;
+    background: rgba(255,255,255,.25); color: inherit; cursor: help; vertical-align: middle;
+}
+.local-gradesheet-page .thead-dark .gs-help { background: rgba(255,255,255,.3); }
+.local-gradesheet-page .gs-advanced-summary {
+    cursor: pointer; padding: .6rem .9rem; border: 1px dashed #adb5bd; border-radius: .35rem; background: #f8f9fa;
+    list-style: none;
+}
+.local-gradesheet-page .gs-advanced-summary::-webkit-details-marker { display: none; }
+.local-gradesheet-page .gs-advanced-summary::before { content: "\25B8"; margin-right: .5rem; color: #6c757d; }
+.local-gradesheet-page .gs-advanced[open] .gs-advanced-summary::before { content: "\25BE"; }

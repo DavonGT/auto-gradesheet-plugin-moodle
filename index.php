@@ -89,9 +89,9 @@ if ($admin_too_many && !$courseid) {
 } else {
     echo '<form method="get" action="">';
     echo '<div class="form-group">';
-    echo '<label for="courseid"><strong>Select Course:</strong></label>';
+    echo '<label for="courseid"><strong>Choose a course</strong> <span class="text-muted small">to open its grade sheet</span></label>';
     echo '<select name="courseid" id="courseid" class="form-control" onchange="this.form.submit()">';
-    echo '<option value="">-- Select a Course --</option>';
+    echo '<option value="">-- Choose a course --</option>';
 
     foreach ($courses as $course) {
         if (!$course) continue;
@@ -243,108 +243,98 @@ if ($courseid) {
         echo '<hr>';
         echo "<h4>Students and Grades - {$safecoursename}</h4>";
 
-        if (!$weightvalid['valid']) {
-            echo '<div class="alert alert-danger d-flex align-items-center" role="alert" style="font-size:16px; padding:15px 20px;">';
-            echo '<span style="font-size:28px; margin-right:12px;">&#9888;</span>';
-            echo '<div>';
-            echo '<strong>WARNING:</strong> Category weights must sum to exactly <strong>100%</strong>. ';
-            echo 'Current total: <strong>' . $weightvalid['total'] . '%</strong>. ';
-            if ($weightvalid['count'] === 0) {
-                echo 'You have <strong>no categories</strong> defined. ';
-            }
-            echo 'Printing and exporting are <strong>disabled</strong> until this is corrected. ';
-            if ($canmanage) {
-                echo '<a href="course_settings.php?courseid=' . $courseid . '" class="btn btn-light btn-sm ml-2 ms-2"><strong>Go to Settings</strong></a>';
-            }
-            echo '</div></div>';
-        }
-
-        // Mapping sanity warnings: unmapped items and empty periods never
-        // block printing, but faculty must see why columns show "-".
-        $mapwarn = helper::get_mapping_warnings($courseid);
-        if ($mapwarn !== null && ($mapwarn['unmapped'] > 0 || $mapwarn['midterm'] === 0 || $mapwarn['finals'] === 0)) {
-            echo '<div class="alert alert-warning d-flex align-items-center" role="alert" style="font-size:16px; padding:15px 20px;">';
-            echo '<span style="font-size:28px; margin-right:12px;">&#9888;</span>';
-            echo '<div>';
-            echo '<strong>WARNING:</strong> ';
-            $parts = [];
-            if ($mapwarn['unmapped'] > 0) {
-                $parts[] = get_string('warnunmappeditems', 'local_gradesheet', $mapwarn['unmapped']);
-            }
-            if ($mapwarn['midterm'] === 0) {
-                $parts[] = get_string('warnnoperioditems', 'local_gradesheet', 'Midterm');
-            }
-            if ($mapwarn['finals'] === 0) {
-                $parts[] = get_string('warnnoperioditems', 'local_gradesheet', 'Finals');
-            }
-            echo implode(' ', $parts);
-            if ($canmanage) {
-                echo '<a href="course_settings.php?courseid=' . $courseid . '" class="btn btn-light btn-sm ml-2 ms-2"><strong>Go to Settings</strong></a>';
-            }
-            echo '</div></div>';
-        }
-
-        // Make the active computation rules visible so faculty know how the
-        // numbers on this page were produced.
-        $rulesparts = [];
-        $rulesparts[] = 'Ungraded items: <strong>' . ($rules['missingaszero'] ? 'counted as 0%' : 'skipped') . '</strong>';
-        $rulesparts[] = 'Hidden items: <strong>' . ($rules['includehidden'] ? 'included' : 'excluded') . '</strong>';
-        $rulesparts[] = 'Final average: <strong>' . rtrim(rtrim(number_format($rules['midtermweight'], 2), '0'), '.') . '% Midterm / '
-            . rtrim(rtrim(number_format(100 - $rules['midtermweight'], 2), '0'), '.') . '% Finals</strong>';
-        $rulesparts[] = 'Rounding before transmutation: <strong>' . ($rules['roundaverage'] ? 'whole number' : 'none') . '</strong>';
-        $fs = helper::get_formula_settings($courseid);
-        if ($fs['mode'] === 'formula') {
-            $clamp = [];
-            if ($fs['min'] !== null) { $clamp[] = 'min ' . rtrim(rtrim(number_format($fs['min'], 2, '.', ''), '0'), '.'); }
-            if ($fs['max'] !== null) { $clamp[] = 'max ' . rtrim(rtrim(number_format($fs['max'], 2, '.', ''), '0'), '.'); }
-            $rulesparts[] = 'Transmutation: <strong><code>' . s($fs['formula']) . '</code></strong>'
-                . ($clamp ? ' (' . implode(', ', $clamp) . ')' : '')
-                . ', pass at <strong>' . rtrim(rtrim(number_format($fs['passmark'], 2, '.', ''), '0'), '.') . '%</strong>';
-        } else {
-            $rulesparts[] = 'Transmutation: <strong>built-in ESSU table</strong>';
-        }
-        echo helper::render_alert(implode(' &middot; ', $rulesparts), 'secondary', '&#8505;',
-            $canmanage ? '<a href="course_settings.php?courseid=' . $courseid . '#computation-rules" class="btn btn-light btn-sm">Change</a>' : '');
-
-        // Signatory lines as they will print: typed name, section override, or auto-detected from roles.
+        // ── One status panel instead of a stack of alerts ─────────────────
+        // Blocking problems get a "Getting started" checklist; otherwise a quiet
+        // one-line status with the computation details tucked behind a toggle.
+        $mapwarn     = helper::get_mapping_warnings($courseid);
+        $health      = helper::settings_health($courseid, $groupid);
+        $nblock      = count(array_filter($health, function ($h) { return $h['level'] === 'danger'; }));
+        $nwarn       = count(array_filter($health, function ($h) { return $h['level'] === 'warning'; }));
+        $fs          = helper::get_formula_settings($courseid);
         $signatories = helper::resolve_signatories($cfg, $courseid, $groupid);
+        $pct         = function ($v) { return rtrim(rtrim(number_format((float)$v, 2, '.', ''), '0'), '.'); };
+
+        $nothingmapped = ($mapwarn === null) || ($mapwarn['midterm'] === 0 && $mapwarn['finals'] === 0);
+        $firstrun = $canmanage && ($nblock > 0 || $nothingmapped);
+
+        if ($firstrun) {
+            // Four-step checklist for a course that cannot print yet.
+            $steps = [
+                ['grade-categories',      'Set categories and weights',  $weightvalid['valid'],
+                    $weightvalid['count'] === 0 ? 'No categories yet.' : 'Weights total ' . $pct($weightvalid['total']) . '%.'],
+                ['grade-mapping',         'Map your graded activities', !$nothingmapped,
+                    $mapwarn === null ? 'The gradebook has no graded activities yet.' : ($nothingmapped ? 'Nothing is mapped yet.' : ($mapwarn['unmapped'] . ' unmapped.'))],
+                ['transmutation-formula', 'Choose the grade formula',   $fs['mode'] === 'formula',
+                    $fs['mode'] === 'formula' ? 'Formula: ' . s($fs['formula']) : 'Using the built-in table (works, but a formula is clearer).'],
+                ['course-details',        'Fill in the report header',
+                    !helper::signatory_is_blank($cfg['coursenumber']) && $signatories['instructor']['name'] !== '',
+                    $signatories['instructor']['name'] !== '' ? 'Instructor: ' . s($signatories['instructor']['name']) : 'Instructor line is blank.'],
+            ];
+            $done = count(array_filter($steps, function ($st) { return $st[2]; }));
+            echo '<div class="card gs-getting-started mb-3">';
+            echo '<div class="card-body">';
+            echo '<h5 class="mb-1">Set up this grade sheet <small class="text-muted">(' . $done . ' of 4 done)</small></h5>';
+            echo '<p class="text-muted mb-2">The sheet cannot be printed until the required steps are complete. Each step takes a minute; the Settings page walks you through them in order.</p>';
+            echo '<ol class="gs-checklist">';
+            foreach ($steps as $i => [$anchor, $label, $ok, $note]) {
+                echo '<li class="' . ($ok ? 'done' : 'todo') . '">'
+                    . '<span class="gs-check">' . ($ok ? '&#10003;' : ($i + 1)) . '</span>'
+                    . '<a href="course_settings.php?courseid=' . $courseid . '#' . $anchor . '">' . $label . '</a>'
+                    . ' <small class="text-muted">' . $note . '</small></li>';
+            }
+            echo '</ol>';
+            echo '<a href="course_settings.php?courseid=' . $courseid . '" class="btn btn-primary">Open Settings &rarr;</a>';
+            echo '</div></div>';
+        } else {
+            // Ready (or nearly): one line, details on demand.
+            if ($nwarn > 0) {
+                $line  = '<strong>' . $nwarn . ' thing' . ($nwarn === 1 ? '' : 's') . ' to check</strong> before you print.';
+                $cls   = 'warning'; $icon = '&#9888;';
+                $action = $canmanage ? '<a href="course_settings.php?courseid=' . $courseid . '#needs-attention" class="btn btn-light btn-sm">See what</a>' : '';
+            } else {
+                $line  = '<strong>Ready to print.</strong> Weights, mapping, formula and signatories are all set.';
+                $cls   = 'success'; $icon = '&#10003;';
+                $action = '';
+            }
+            echo helper::render_alert($line, $cls, $icon, $action);
+        }
+
+        // "How are these numbers computed?" — collapsed by default so the page stays calm.
+        $rulesparts = [];
+        $rulesparts[] = 'Final average = <strong>' . $pct($rules['midtermweight']) . '% Midterm + ' . $pct(100 - $rules['midtermweight']) . '% Finals</strong>';
+        $rulesparts[] = 'Grade from percentage: <strong>' . ($fs['mode'] === 'formula' ? '<code>' . s($fs['formula']) . '</code>' : 'built-in ESSU table') . '</strong>'
+            . ($fs['mode'] === 'formula' ? ', passing at <strong>' . $pct($fs['passmark']) . '%</strong>' : '');
+        $rulesparts[] = 'Ungraded work is <strong>' . ($rules['missingaszero'] ? 'counted as 0%' : 'skipped') . '</strong>; hidden items are <strong>' . ($rules['includehidden'] ? 'included' : 'excluded') . '</strong>'
+            . ($rules['roundaverage'] ? '; averages are <strong>rounded to whole numbers</strong> first' : '');
         $sigparts = [];
-        $sigmissing = false;
         foreach (['instructor' => 'Instructor', 'department_head' => 'Dept. Head', 'registrar' => 'Registrar', 'college_dean' => 'Dean'] as $k => $lbl) {
             $sg = $signatories[$k];
-            if ($sg['name'] === '') {
-                $sigmissing = true;
-                $sigparts[] = $lbl . ': <span class="text-danger">not set</span> <small class="text-muted">(' . s($sg['source']) . ')</small>';
-            } else {
-                $sigparts[] = $lbl . ': <strong>' . s($sg['name']) . '</strong> <small class="text-muted" title="' . s($sg['source']) . '">(' . $sg['how'] . ')</small>';
-            }
+            $sigparts[] = $lbl . ': ' . ($sg['name'] === ''
+                ? '<span class="text-danger">blank</span> <small class="text-muted">(' . s($sg['source']) . ')</small>'
+                : '<strong>' . s($sg['name']) . '</strong> <small class="text-muted" title="' . s($sg['source']) . '">' . $sg['how'] . '</small>');
         }
-        echo helper::render_alert('Signatories &mdash; ' . implode(' &middot; ', $sigparts), $sigmissing ? 'warning' : 'secondary', $sigmissing ? '&#9888;' : '&#9998;',
-            $canmanage ? '<a href="course_settings.php?courseid=' . $courseid . '" class="btn btn-light btn-sm">Edit</a>' : '');
-
-        // One-line reminder when Settings has problems that would affect the printed sheet.
+        echo '<details class="gs-details mb-3">';
+        echo '<summary>How are these grades computed, and who signs the sheet?</summary>';
+        echo '<ul class="mb-1"><li>' . implode('</li><li>', $rulesparts) . '</li></ul>';
+        echo '<div class="small">' . implode(' &middot; ', $sigparts) . '</div>';
         if ($canmanage) {
-            $health = helper::settings_health($courseid, $groupid);
-            $nblock = count(array_filter($health, function ($h) { return $h['level'] === 'danger'; }));
-            $nwarn  = count(array_filter($health, function ($h) { return $h['level'] === 'warning'; }));
-            if ($nblock + $nwarn > 0) {
-                $msg = '<strong>Settings need attention:</strong> '
-                    . ($nblock ? $nblock . ' blocking issue(s)' : '')
-                    . ($nblock && $nwarn ? ' and ' : '')
-                    . ($nwarn ? $nwarn . ' warning(s)' : '')
-                    . ' would affect the printed sheet.';
-                echo helper::render_alert($msg, $nblock ? 'danger' : 'warning', '&#9888;',
-                    '<a href="course_settings.php?courseid=' . $courseid . '#needs-attention" class="btn btn-light btn-sm">Review</a>');
-            }
+            echo '<a href="course_settings.php?courseid=' . $courseid . '" class="small">Change in Settings &rarr;</a>';
         }
+        echo '</details>';
 
         if ($canmanage) {
             $groupparam = ($groupid > 0) ? '&group=' . $groupid : '';
             $btncls = $weightvalid['valid'] ? '' : ' disabled';
-            echo '<a href="preview.php?courseid='      . $courseid . $groupparam . '" id="btnGradesheetPreview" onclick="openGradesheetPdfPreview(event)" class="btn btn-primary mb-3' . $btncls . '">Preview & Print</a> ';
-            echo '<a href="export.php?courseid='       . $courseid . $groupparam . '" class="btn btn-success mb-3' . $btncls . '">Download PDF</a> ';
-            echo '<a href="export_excel.php?courseid=' . $courseid . $groupparam . '" class="btn btn-warning mb-3' . $btncls . '">Download Excel</a> ';
-            echo '<a href="course_settings.php?courseid=' . $courseid . '" class="btn btn-secondary mb-3">Settings</a>';
+            $why    = $weightvalid['valid'] ? '' : ' title="Disabled: category weights must total 100% (see Settings, Step 1)"';
+            echo '<div class="gs-actions mb-3">';
+            echo '<a href="preview.php?courseid='      . $courseid . $groupparam . '" id="btnGradesheetPreview" onclick="openGradesheetPdfPreview(event)" class="btn btn-primary' . $btncls . '"' . $why . '>&#128424; Preview &amp; Print</a> ';
+            echo '<a href="export.php?courseid='       . $courseid . $groupparam . '" class="btn btn-outline-success' . $btncls . '"' . $why . '>Download PDF</a> ';
+            echo '<a href="export_excel.php?courseid=' . $courseid . $groupparam . '" class="btn btn-outline-success' . $btncls . '"' . $why . '>Download Excel</a> ';
+            echo '<a href="course_settings.php?courseid=' . $courseid . '" class="btn btn-outline-secondary ml-auto ms-auto">&#9881; Settings</a>';
+            echo '</div>';
+            if ($groupid > 0) {
+                echo '<p class="text-muted small">Exports contain only the section selected above. Pick "All participants" to print the whole course.</p>';
+            }
         }
 
         echo '<div class="row align-items-end mb-3">';
@@ -388,7 +378,7 @@ if ($courseid) {
         // table's gs-period-* class decides which set is visible (see styles.css).
         $mapcounts = $mapwarn ?? ['midterm' => 0, 'finals' => 0, 'unmapped' => 0];
         echo '<ul class="nav nav-tabs gs-period-tabs mb-0" id="gradesheetPeriodTabs" role="tablist">';
-        foreach (['midterm' => 'Midterm', 'finals' => 'Finals', 'summary' => 'Summary'] as $pk => $plabel) {
+        foreach (['midterm' => 'Midterm', 'finals' => 'Finals', 'summary' => 'Final Grades (what prints)'] as $pk => $plabel) {
             $count = ($pk === 'summary') ? '' : ' <span class="badge badge-light border">' . (int)$mapcounts[$pk] . ' item' . ((int)$mapcounts[$pk] === 1 ? '' : 's') . '</span>';
             echo '<li class="nav-item"><a href="#" class="nav-link" data-gs-tab="' . $pk . '" onclick="gradesheetShowPeriod(\'' . $pk . '\'); return false;" role="tab">' . $plabel . $count . '</a></li>';
         }
@@ -397,6 +387,7 @@ if ($courseid) {
         echo '<table class="table table-bordered table-striped gs-period-table" id="gradesheetStudentTable">';
         echo '<thead class="thead-dark"><tr>';
         echo '<th>#</th><th>Student ID</th><th>Student Name</th>';
+        $help = function (string $text): string { return ' <span class="gs-help" title="' . s($text) . '">?</span>'; };
 
         // Midterm / Finals tabs: category averages for that period only.
         foreach (['midterm', 'finals'] as $pk) {
@@ -405,16 +396,18 @@ if ($courseid) {
                     echo '<th data-gs-period="' . $pk . '">' . s($cat->name) . ' <small>(' . $cat->weight . '%)</small></th>';
                 }
             }
-            echo '<th data-gs-period="' . $pk . '" title="Graded items / mapped items in this period">Graded</th>';
-            echo '<th data-gs-period="' . $pk . '">' . ucfirst($pk) . ' Grade</th>';
-            echo '<th data-gs-period="' . $pk . '">Equivalent</th>';
+            echo '<th data-gs-period="' . $pk . '">Graded' . $help('Scored items / counted items in this period. Yellow means some work is still ungraded.') . '</th>';
+            echo '<th data-gs-period="' . $pk . '">' . ucfirst($pk) . ' %' . $help('The weighted percentage for this period, before transmutation.') . '</th>';
+            echo '<th data-gs-period="' . $pk . '">Grade' . $help('The percentage converted with the course formula (what the registrar sheet shows).') . '</th>';
         }
 
         // Summary tab: what goes on the official sheet.
-        echo '<th data-gs-period="summary" title="Graded items / mapped items">Graded</th>';
+        echo '<th data-gs-period="summary">Graded' . $help('Scored items / counted items across both periods.') . '</th>';
         echo '<th data-gs-period="summary">Midterm</th><th data-gs-period="summary">Finals</th>';
-        echo '<th data-gs-period="summary">Average</th><th data-gs-period="summary">Rating</th><th data-gs-period="summary">Remarks</th>';
-        echo '<th>Status</th>';
+        echo '<th data-gs-period="summary">Final Grade' . $help('Transmuted final grade; the raw average is shown beside it.') . '</th>';
+        echo '<th data-gs-period="summary">Rating' . $help('The adjectival rating (Outstanding, Very Good, ...) for the raw average.') . '</th>';
+        echo '<th data-gs-period="summary">Remarks</th>';
+        echo '<th>Academic Status' . $help('Leave as Active to compute normally. Choose Incomplete, Dropped, Withdrawn or In Progress to print that label instead of grades.') . '</th>';
         echo '</tr></thead>';
         echo '<tbody>';
 

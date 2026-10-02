@@ -512,9 +512,13 @@ echo '<div class="local-gradesheet-page">';
 ?>
 
 <div class="container mt-4">
-    <h2>Grade Sheet Settings</h2>
-    <h5 class="text-muted">Course: <?php echo s(format_string($coursename)); ?></h5>
-    <a href="index.php?courseid=<?php echo $courseid; ?>" class="btn btn-secondary mb-3">← Back to Grade Sheet</a>
+    <div class="d-flex align-items-center justify-content-between flex-wrap">
+        <div>
+            <h2 class="mb-0">Grade Sheet Settings</h2>
+            <div class="text-muted"><?php echo s(format_string($coursename)); ?> &mdash; everything you set here applies to every section of this course.</div>
+        </div>
+        <a href="index.php?courseid=<?php echo $courseid; ?>" class="btn btn-secondary mt-2">&larr; Back to the grade sheet</a>
+    </div>
     <hr>
 
     <!-- Needs attention: everything that would make the printed sheet wrong, blocked, or incomplete -->
@@ -545,225 +549,60 @@ echo '<div class="local-gradesheet-page">';
         </div>
     <?php endif; ?>
 
-    <!-- SECTION 1: Course Details -->
-    <div class="card mb-4" id="course-details">
-        <div class="card-header bg-dark text-white">
-            <strong>Course Details & Signatories</strong>
+
+    <!-- Step navigation: the whole setup in order, with status from the health check -->
+    <?php
+    $stepdefs = [
+        ['grade-categories',      '1', 'Categories & Weights'],
+        ['grade-mapping',         '2', 'Map Grade Items'],
+        ['transmutation-formula', '3', 'Grade Formula'],
+        ['course-details',        '4', 'Details & Signatories'],
+        ['computation-rules',     '5', 'Rules'],
+        ['section-overrides',     '6', 'Sections'],
+    ];
+    $anchormap = [ // which health anchors roll up into which step
+        'grade-categories' => 'grade-categories', 'grade-mapping' => 'grade-mapping',
+        'transmutation-formula' => 'transmutation-formula', 'grading-scale' => 'transmutation-formula',
+        'course-details' => 'course-details', 'sig-instructor' => 'course-details', 'sig-department_head' => 'course-details',
+        'sig-registrar' => 'course-details', 'sig-college_dean' => 'course-details',
+        'computation-rules' => 'computation-rules', 'section-overrides' => 'section-overrides',
+    ];
+    $stepstatus = [];
+    foreach ($health as $h) {
+        $st = $anchormap[$h['anchor']] ?? null;
+        if (!$st) { continue; }
+        $cur = $stepstatus[$st] ?? 'info';
+        $rank = ['danger' => 3, 'warning' => 2, 'info' => 1];
+        if (($rank[$h['level']] ?? 0) > ($rank[$cur] ?? 0)) { $stepstatus[$st] = $h['level']; }
+    }
+    $donecount = 0;
+    foreach ($stepdefs as [$a]) { if (!isset($stepstatus[$a]) || $stepstatus[$a] === 'info') { $donecount++; } }
+    ?>
+    <nav class="gs-stepnav" aria-label="Setup steps">
+        <div class="gs-stepnav-title">
+            <strong>Set up in order</strong>
+            <span class="text-muted small">&mdash; <?php echo $donecount; ?> of <?php echo count($stepdefs); ?> steps ready</span>
         </div>
-        <div class="card-body">
-            <form method="post">
-                <input type="hidden" name="action" value="savedetails">
-                <input type="hidden" name="sesskey" value="<?php echo sesskey(); ?>">
-
-                <?php if (!class_exists('\\core_course\\hook\\after_form_definition')): ?>
-                    <p class="text-muted small">This Moodle version (older than 4.4) has no course-form hook, so these fields are edited here only.</p>
-                <?php endif; ?>
-                <h6 class="text-muted mb-3">- Report Header -</h6>
-                <div class="form-group row mb-3">
-                    <label class="col-sm-4 col-form-label"><strong>Semester</strong></label>
-                    <div class="col-sm-5">
-                        <select name="semester" class="form-control">
-                            <?php foreach (['First Semester','Second Semester','Summer'] as $s): ?>
-                            <option value="<?php echo $s; ?>" <?php echo ($config && $config->semester === $s) ? 'selected' : ''; ?>>
-                                <?php echo $s; ?>
-                            </option>
-                            <?php endforeach; ?>
-                        </select>
-                    </div>
-                </div>
-                <div class="form-group row mb-3">
-                    <label class="col-sm-4 col-form-label"><strong>School Year</strong></label>
-                    <div class="col-sm-4">
-                        <input type="text" name="schoolyear" class="form-control" maxlength="20" required
-                               pattern="\d{4}\s*-\s*\d{4}" title="Two consecutive years, e.g. 2026-2027" placeholder="e.g. <?php echo date('Y') . '-' . (date('Y') + 1); ?>"
-                               value="<?php echo $config ? s($config->schoolyear) : date('Y') . '-' . (date('Y') + 1); ?>">
-                    </div>
-                </div>
-
-                <hr><h6 class="text-muted mb-3">- Course Information -</h6>
-
-                <?php
-                // [label, placeholder, maxlen, required, hint]
-                $fields = [
-                    'coursenumber'  => ['Subject and Course No.', 'e.g. CS 101', 50, true, ''],
-                    'descriptive'   => ['Descriptive Title',      'e.g. Computer Programming 1', 100, true, ''],
-                    'courseandyear' => ['Course and Year',         'e.g. BSCS 2A', 50, false, empty($coursegroups) ? '' : 'Overridden per section by the group name (see Per-Section Overrides).'],
-                    'schedule'      => ['Schedule of Classes',     'e.g. MWF 8:00-9:00 AM', 50, false, empty($coursegroups) ? '' : 'Course-wide default; sections can override it below.'],
-                ];
-                foreach ($fields as $fname => [$label, $placeholder, $maxlen, $req, $hint]):
-                ?>
-                <div class="form-group row mb-3">
-                    <label class="col-sm-4 col-form-label"><strong><?php echo $label; ?></strong><?php echo $req ? ' <span class="text-danger">*</span>' : ''; ?></label>
-                    <div class="col-sm-6">
-                        <input type="text" name="<?php echo $fname; ?>" class="form-control" maxlength="<?php echo $maxlen; ?>" <?php echo $req ? 'required' : ''; ?>
-                               value="<?php echo $config && isset($config->$fname) ? s($config->$fname) : ''; ?>"
-                               placeholder="<?php echo $placeholder; ?>">
-                        <?php if ($hint !== ''): ?><small class="form-text text-muted"><?php echo $hint; ?></small><?php endif; ?>
-                    </div>
-                </div>
-                <?php endforeach; ?>
-                <div class="form-group row mb-3">
-                    <label class="col-sm-4 col-form-label"><strong>Number of Units</strong> <span class="text-danger">*</span></label>
-                    <div class="col-sm-3">
-                        <input type="number" name="units" class="form-control" min="0" max="12" step="0.5" required placeholder="e.g. 3"
-                               value="<?php echo $config && isset($config->units) ? s($config->units) : '3'; ?>">
-                    </div>
-                </div>
-
-                <hr><h6 class="text-muted mb-1">- Signatories -</h6>
-                <p class="text-muted small mb-3">
-                    Leave a field <strong>blank</strong> to use the name auto-detected from Moodle roles
-                    (Instructor = the course/section teacher; the others = holders of the Department Head,
-                    Registrar and College Dean roles in this course's category tree or the site).
-                    Type a name only to override.
-                </p>
-
-                <?php
-                $sigs = [
-                    'instructor'      => 'Instructor',
-                    'department_head' => 'Department Head',
-                    'registrar'       => 'Registrar',
-                    'college_dean'    => 'College Dean',
-                ];
-                foreach ($sigs as $fname => $label):
-                    $stored  = ($config && isset($config->$fname)) ? (string)$config->$fname : '';
-                    $isblank = helper::signatory_is_blank($stored);
-                    $det     = $detected[$fname];
-                ?>
-                <div class="form-group row mb-3">
-                    <label class="col-sm-4 col-form-label"><strong><?php echo $label; ?></strong></label>
-                    <div class="col-sm-6">
-                        <input type="text" name="<?php echo $fname; ?>" id="sig-<?php echo $fname; ?>" class="form-control" maxlength="100"
-                               value="<?php echo $isblank ? '' : s($stored); ?>"
-                               placeholder="<?php echo $det['name'] !== '' ? s($det['name']) : 'Auto-detect (nothing found yet)'; ?>">
-                        <small class="form-text">
-                            <?php if ($det['name'] !== ''): ?>
-                                <span class="text-success">&#10003; Auto-detected: <strong><?php echo s($det['name']); ?></strong></span>
-                                <span class="text-muted">(<?php echo s($det['source']); ?>)</span>
-                                <?php if (!$isblank): ?>
-                                    &mdash; <span class="text-warning">overridden by the typed name</span>
-                                    <a href="#" onclick="document.getElementById('sig-<?php echo $fname; ?>').value=''; return false;">use auto-detect</a>
-                                <?php endif; ?>
-                            <?php else: ?>
-                                <span class="text-muted">&#9888; Not detected: <?php echo s($det['source']); ?>.<?php echo $isblank ? ' This line will print blank until a role is assigned or a name is typed.' : ''; ?></span>
-                            <?php endif; ?>
-                        </small>
-                    </div>
-                </div>
-                <?php endforeach; ?>
-
-                <button type="submit" class="btn btn-primary">Save Course Details</button>
-            </form>
-        </div>
-    </div>
-
-    <!-- SECTION 1b: Computation Rules -->
-    <div class="card mb-4" id="computation-rules">
-        <div class="card-header bg-dark text-white">
-            <strong>Computation Rules</strong>
-        </div>
-        <div class="card-body">
-            <p class="text-muted">
-                These switches control how the plugin turns gradebook scores into period grades. They apply to
-                every section of this course and are shown on the grade sheet page so faculty always know which
-                rules produced the numbers.
-            </p>
-            <form method="post">
-                <input type="hidden" name="action" value="saverules">
-                <input type="hidden" name="sesskey" value="<?php echo sesskey(); ?>">
-
-                <div class="form-check mb-2">
-                    <input type="checkbox" class="form-check-input" id="missingaszero" name="missingaszero" value="1"
-                           <?php echo $rules['missingaszero'] ? 'checked' : ''; ?>>
-                    <label class="form-check-label" for="missingaszero">
-                        <strong>Count ungraded items as 0%</strong>
-                        <br><small class="text-muted">Off: a mapped item with no grade is skipped, so a student who completed 1 of 5 quizzes is averaged over 1 quiz. On: missing work counts as zero. Turn this on when finalizing the official sheet.</small>
-                    </label>
-                </div>
-
-                <div class="form-check mb-2">
-                    <input type="checkbox" class="form-check-input" id="includehidden" name="includehidden" value="1"
-                           <?php echo $rules['includehidden'] ? 'checked' : ''; ?>>
-                    <label class="form-check-label" for="includehidden">
-                        <strong>Include hidden grade items in faculty computation</strong>
-                        <br><small class="text-muted">Items hidden from students in the gradebook still count on the faculty grade sheet and exports. The student's own view never includes hidden items.</small>
-                    </label>
-                </div>
-
-                <div class="form-check mb-3">
-                    <input type="checkbox" class="form-check-input" id="roundaverage" name="roundaverage" value="1"
-                           <?php echo $rules['roundaverage'] ? 'checked' : ''; ?>>
-                    <label class="form-check-label" for="roundaverage">
-                        <strong>Round averages to whole numbers before transmutation</strong>
-                        <br><small class="text-muted">Off: 89.6 transmutes as 89.6 (1.6). On: 89.6 rounds to 90 first (1.5). Match this to the Registrar's rule.</small>
-                    </label>
-                </div>
-
-                <div class="form-group row mb-3">
-                    <label class="col-sm-4 col-form-label" for="midtermweight"><strong>Midterm share of final average (%)</strong></label>
-                    <div class="col-sm-3">
-                        <input type="number" step="0.01" min="0" max="100" class="form-control" id="midtermweight" name="midtermweight"
-                               value="<?php echo s(rtrim(rtrim(number_format($rules['midtermweight'], 2), '0'), '.')); ?>" required>
-                    </div>
-                    <div class="col-sm-5 col-form-label">
-                        <small class="text-muted">Finals share is 100 minus this. 50 = equal weighting; 33.33 = one-third / two-thirds.</small>
-                    </div>
-                </div>
-
-                <button type="submit" class="btn btn-primary">Save Computation Rules</button>
-            </form>
-        </div>
-    </div>
-
-    <!-- SECTION 1c: Per-section overrides -->
-    <div class="card mb-4" id="section-overrides">
-        <div class="card-header bg-dark text-white">
-            <strong>Per-Section Overrides</strong>
-        </div>
-        <div class="card-body">
-            <?php if (empty($coursegroups)): ?>
-                <?php echo \local_gradesheet\helper::render_alert("This course has no groups. If one Moodle course holds several sections, create one group per section (Participants &rarr; Groups); each group then gets its own grade sheet with its own section label, schedule and instructor line.", "secondary"); ?>
-            <?php else: ?>
-                <p class="text-muted">
-                    Each group is treated as a section. Leave a field blank to use the course-wide value from
-                    Course Details (section label defaults to the group name; instructor defaults to the group's
-                    teacher when there is exactly one). Grading categories, weights and the scale are shared by all sections.
-                </p>
-                <table class="table table-bordered table-sm mb-0">
-                    <thead class="thead-dark">
-                        <tr><th>Group / Section</th><th>Section label</th><th>Schedule</th><th>Instructor</th><th></th></tr>
-                    </thead>
-                    <tbody>
-                    <?php foreach ($coursegroups as $grp):
-                        $gc = $groupcfgs[$grp->id] ?? null; ?>
-                        <tr>
-                            <td>
-                                <form method="post" id="groupcfg<?php echo $grp->id; ?>">
-                                    <input type="hidden" name="action" value="savegroupcfg">
-                                    <input type="hidden" name="sesskey" value="<?php echo sesskey(); ?>">
-                                    <input type="hidden" name="groupid" value="<?php echo $grp->id; ?>">
-                                </form>
-                                <strong><?php echo s(format_string($grp->name)); ?></strong>
-                            </td>
-                            <td><input type="text" name="g_courseandyear" form="groupcfg<?php echo $grp->id; ?>" class="form-control form-control-sm" maxlength="50"
-                                       placeholder="<?php echo s(format_string($grp->name)); ?>" value="<?php echo $gc ? s($gc->courseandyear) : ''; ?>"></td>
-                            <td><input type="text" name="g_schedule" form="groupcfg<?php echo $grp->id; ?>" class="form-control form-control-sm" maxlength="50"
-                                       placeholder="<?php echo $config ? s($config->schedule) : ''; ?>" value="<?php echo $gc ? s($gc->schedule) : ''; ?>"></td>
-                            <td><input type="text" name="g_instructor" form="groupcfg<?php echo $grp->id; ?>" class="form-control form-control-sm" maxlength="100"
-                                       placeholder="<?php echo $config ? s($config->instructor) : ''; ?>" value="<?php echo $gc ? s($gc->instructor) : ''; ?>"></td>
-                            <td><button type="submit" form="groupcfg<?php echo $grp->id; ?>" class="btn btn-primary btn-sm">Save</button></td>
-                        </tr>
-                    <?php endforeach; ?>
-                    </tbody>
-                </table>
-            <?php endif; ?>
-        </div>
-    </div>
+        <ol class="gs-stepnav-list">
+            <?php foreach ($stepdefs as [$anchor, $num, $label]):
+                $st = $stepstatus[$anchor] ?? 'ok';
+                $icon = ['danger' => '&#10005;', 'warning' => '&#9888;', 'info' => '&#10003;', 'ok' => '&#10003;'][$st];
+            ?>
+            <li class="gs-step gs-step-<?php echo $st; ?>">
+                <a href="#<?php echo $anchor; ?>" title="<?php echo $st === 'danger' ? 'Blocks printing' : ($st === 'warning' ? 'Needs attention' : 'Ready'); ?>">
+                    <span class="gs-step-num"><?php echo $num; ?></span>
+                    <span class="gs-step-label"><?php echo $label; ?></span>
+                    <span class="gs-step-icon"><?php echo $icon; ?></span>
+                </a>
+            </li>
+            <?php endforeach; ?>
+        </ol>
+    </nav>
 
     <!-- SECTION 2: Grade Categories -->
     <div class="card mb-4" id="grade-categories">
         <div class="card-header bg-dark text-white">
-            <strong>Grade Categories & Weights</strong>
+            <span class="gs-step-badge">1</span><strong>Grade Categories & Weights</strong><div class="gs-step-blurb">What counts toward the grade and by how much, e.g. Quizzes 30%, Activities 30%, Exams 40%. The weights must add up to 100%.</div>
         </div>
         <div class="card-body">
             <?php if (!$weightvalid['valid']): ?>
@@ -874,13 +713,16 @@ echo '<div class="local-gradesheet-page">';
                     </div>
                 </div>
             </form>
+            <div class="gs-step-next text-right">
+                <a href="#grade-mapping" class="btn btn-outline-primary btn-sm">Next: map your grade items &rarr;</a>
+            </div>
         </div>
     </div>
 
     <!-- SECTION 3: Grade Item Mapping -->
     <div class="card mb-4" id="grade-mapping">
         <div class="card-header bg-dark text-white">
-            <strong>Grade Item Mapping</strong>
+            <span class="gs-step-badge">2</span><strong>Grade Item Mapping</strong><div class="gs-step-blurb">Tell the sheet which category each Moodle activity belongs to and whether it is Midterm or Finals work. Unmapped items are ignored.</div>
         </div>
         <div class="card-body">
             <?php
@@ -902,34 +744,68 @@ echo '<div class="local-gradesheet-page">';
             <?php endif; ?>
 
             <?php if (empty($categories)): ?>
-                <?php echo \local_gradesheet\helper::render_alert("Please add grade categories first before mapping grade items.", "warning", "⚠"); ?>
+                <?php echo \local_gradesheet\helper::render_alert("Add at least one grade category in <strong>Step 1</strong> first; then come back here to assign your activities to it.", "warning", "&#9888;", '<a href="#grade-categories" class="btn btn-light btn-sm">Go to Step 1</a>'); ?>
             <?php elseif (empty($gitems)): ?>
-                <?php echo \local_gradesheet\helper::render_alert("No grade items found in this course.", "warning"); ?>
-            <?php else: ?>
-                <p class="text-muted">Assign each grade item to a <strong>Category</strong> and a <strong>Period</strong>.</p>
-                <form method="post">
+                <?php echo \local_gradesheet\helper::render_alert("Your Moodle gradebook has no graded activities yet, so there is nothing to map. Create quizzes, assignments or manual grade items in the course (Grades &rarr; Gradebook setup) and this list fills in automatically.", "info", "&#8505;"); ?>
+            <?php else:
+                $validcatids = array_keys($categories);
+                $unmappedcount = 0;
+                foreach ($gitems as $gitem) {
+                    $cc = $mappings[$gitem->id]['categoryid'] ?? 0;
+                    if (!$cc || !in_array((int)$cc, $validcatids, true)) { $unmappedcount++; }
+                }
+            ?>
+                <p class="text-muted mb-2">
+                    Assign each activity to a <strong>Category</strong> and a <strong>Period</strong>
+                    (<em>Midterm</em> = work before the midterm exam, <em>Finals</em> = work after it).
+                    Rows shaded yellow are not yet mapped and will not count.
+                </p>
+                <?php if ($unmappedcount > 0): ?>
+                    <div class="gs-mapping-status text-warning mb-2">&#9888; <strong><?php echo $unmappedcount; ?></strong> of <?php echo count($gitems); ?> items still unmapped.</div>
+                <?php else: ?>
+                    <div class="gs-mapping-status text-success mb-2">&#10003; All <?php echo count($gitems); ?> items are mapped.</div>
+                <?php endif; ?>
+                <form method="post" id="mappingForm">
                     <input type="hidden" name="action" value="savemapping">
                     <input type="hidden" name="sesskey" value="<?php echo sesskey(); ?>">
-                    <table class="table table-bordered table-striped">
+
+                    <div class="gs-bulk-tools form-inline mb-2">
+                        <span class="mr-2 me-2 text-muted small">Quick fill:</span>
+                        <select id="bulkCat" class="form-control form-control-sm mr-1 me-1" aria-label="Category for all unmapped items">
+                            <option value="">Category for unmapped items&hellip;</option>
+                            <?php foreach ($categories as $cat): ?>
+                                <option value="<?php echo $cat->id; ?>"><?php echo s($cat->name); ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                        <button type="button" class="btn btn-outline-secondary btn-sm mr-3 me-3" onclick="gsBulkCategory()">Apply to unmapped</button>
+                        <button type="button" class="btn btn-outline-secondary btn-sm mr-1 me-1" onclick="gsBulkPeriod('midterm')">All &rarr; Midterm</button>
+                        <button type="button" class="btn btn-outline-secondary btn-sm" onclick="gsBulkPeriod('finals')">All &rarr; Finals</button>
+                        <span class="ml-2 ms-2 text-muted small">(then press Save Mapping)</span>
+                    </div>
+
+                    <table class="table table-bordered table-sm gs-mapping-table">
                         <thead class="thead-dark">
                             <tr>
-                                <th>Grade Item</th>
-                                <th>Max Grade</th>
+                                <th>Grade Item <small class="font-weight-normal">(from your gradebook)</small></th>
+                                <th title="Highest possible score in Moodle; every item is converted to a percentage">Max Score</th>
                                 <th>Category</th>
                                 <th>Period</th>
                             </tr>
                         </thead>
                         <tbody>
                             <?php foreach ($gitems as $gitem):
-                                $curcat    = isset($mappings[$gitem->id]) ? $mappings[$gitem->id]['categoryid'] : 0;
+                                $curcat    = isset($mappings[$gitem->id]) ? (int)$mappings[$gitem->id]['categoryid'] : 0;
                                 $curperiod = isset($mappings[$gitem->id]) ? $mappings[$gitem->id]['period']     : 'finals';
+                                $ismapped  = $curcat && in_array($curcat, $validcatids, true);
                             ?>
-                            <tr>
-                                <td><strong><?php echo format_string($gitem->itemname); ?></strong></td>
+                            <tr class="<?php echo $ismapped ? '' : 'table-warning'; ?>" data-gs-mapped="<?php echo $ismapped ? '1' : '0'; ?>">
+                                <td><strong><?php echo format_string($gitem->itemname); ?></strong>
+                                    <?php if (!empty($gitem->hidden)): ?><span class="badge badge-secondary ml-1 ms-1" title="Hidden from students in the gradebook">hidden</span><?php endif; ?>
+                                </td>
                                 <td><?php echo number_format($gitem->grademax, 0); ?></td>
                                 <td>
-                                    <select name="cat_<?php echo $gitem->id; ?>" class="form-control form-control-sm">
-                                        <option value="0">-- Select Category --</option>
+                                    <select name="cat_<?php echo $gitem->id; ?>" class="form-control form-control-sm gs-map-cat" onchange="gsRowMapped(this)">
+                                        <option value="0">-- Not counted --</option>
                                         <?php foreach ($categories as $cat): ?>
                                         <option value="<?php echo $cat->id; ?>"
                                             <?php echo ($curcat == $cat->id) ? 'selected' : ''; ?>>
@@ -939,7 +815,7 @@ echo '<div class="local-gradesheet-page">';
                                     </select>
                                 </td>
                                 <td>
-                                    <select name="period_<?php echo $gitem->id; ?>" class="form-control form-control-sm">
+                                    <select name="period_<?php echo $gitem->id; ?>" class="form-control form-control-sm gs-map-period">
                                         <option value="midterm" <?php echo ($curperiod === 'midterm') ? 'selected' : ''; ?>>Midterm</option>
                                         <option value="finals"  <?php echo ($curperiod === 'finals')  ? 'selected' : ''; ?>>Finals</option>
                                     </select>
@@ -949,15 +825,19 @@ echo '<div class="local-gradesheet-page">';
                         </tbody>
                     </table>
                     <button type="submit" class="btn btn-primary">Save Mapping</button>
+                    <span class="text-muted small ml-2 ms-2">New activities you add to the course later show up here unmapped; come back and map them.</span>
                 </form>
             <?php endif; ?>
+            <div class="gs-step-next text-right">
+                <a href="#transmutation-formula" class="btn btn-outline-primary btn-sm">Next: choose the grade formula &rarr;</a>
+            </div>
         </div>
     </div>
 
     <!-- SECTION 4a: Transmutation Formula -->
     <div class="card mb-4" id="transmutation-formula">
         <div class="card-header bg-dark text-white">
-            <strong>Transmutation Formula (Percentage &rarr; Grade)</strong>
+            <span class="gs-step-badge">3</span><strong>Transmutation Formula (Percentage &rarr; Grade)</strong><div class="gs-step-blurb">How a percentage becomes the grade printed on the sheet. Pick a preset or write your own; the preview shows exactly what students will get.</div>
         </div>
         <div class="card-body">
             <p class="text-muted">
@@ -1061,13 +941,24 @@ echo '<div class="local-gradesheet-page">';
 
                 <button type="submit" class="btn btn-primary mt-2">Save Transmutation Settings</button>
             </form>
+            <div class="gs-step-next text-right">
+                <a href="#course-details" class="btn btn-outline-primary btn-sm">Next: fill in the report header &rarr;</a>
+            </div>
         </div>
     </div>
 
-    <!-- SECTION 4b: Adjectival rating brackets (legend) -->
-    <div class="card mb-4" id="grading-scale">
-        <div class="card-header bg-dark text-white">
+    <!-- SECTION 4b: Adjectival rating brackets (legend) — advanced, collapsed unless in use -->
+    <?php $scaleopen = $usingcustomscale || isset($stepstatus['transmutation-formula']) && in_array($stepstatus['transmutation-formula'], ['warning', 'danger'], true); ?>
+    <details class="gs-advanced mb-4" id="grading-scale-wrap" <?php echo $scaleopen ? 'open' : ''; ?>>
+        <summary class="gs-advanced-summary">
+            <span class="gs-step-badge gs-step-badge-sub" style="background:#343a40;color:#fff">3b</span>
             <strong>Rating Brackets (Adjectival Legend)</strong>
+            <span class="badge badge-light ml-2 ms-2">Optional</span>
+            <span class="text-muted small ml-2 ms-2"><?php echo $usingcustomscale ? 'Custom ranges in use' : 'Using the standard ESSU ranges &mdash; open only if your college uses different words or ranges'; ?></span>
+        </summary>
+    <div class="card mt-2" id="grading-scale">
+        <div class="card-header bg-dark text-white">
+            <span class="gs-step-badge gs-step-badge-sub">3b</span><strong>Rating Brackets (Adjectival Legend)</strong> <span class="badge badge-light ml-2 ms-2">Optional</span><div class="gs-step-blurb">Optional. The words next to each grade range (Outstanding, Very Good, &hellip;). Leave empty to use the standard ESSU ranges.</div>
         </div>
         <div class="card-body">
             <p class="text-muted">
@@ -1222,11 +1113,267 @@ echo '<div class="local-gradesheet-page">';
                     </div>
                 </div>
             </form>
+            <div class="gs-step-next text-right">
+                <a href="#course-details" class="btn btn-outline-primary btn-sm">Next: fill in the report header &rarr;</a>
+            </div>
         </div>
     </div>
+    </details>
+
+    <!-- SECTION 1: Course Details -->
+    <div class="card mb-4" id="course-details">
+        <div class="card-header bg-dark text-white">
+            <span class="gs-step-badge">4</span><strong>Course Details & Signatories</strong><div class="gs-step-blurb">What prints at the top and bottom of the official sheet. Signatories are filled in automatically from Moodle roles when left blank.</div>
+        </div>
+        <div class="card-body">
+            <form method="post">
+                <input type="hidden" name="action" value="savedetails">
+                <input type="hidden" name="sesskey" value="<?php echo sesskey(); ?>">
+
+                <?php if (!class_exists('\\core_course\\hook\\after_form_definition')): ?>
+                    <p class="text-muted small">This Moodle version (older than 4.4) has no course-form hook, so these fields are edited here only.</p>
+                <?php endif; ?>
+                <h6 class="text-muted mb-3">- Report Header -</h6>
+                <div class="form-group row mb-3">
+                    <label class="col-sm-4 col-form-label"><strong>Semester</strong></label>
+                    <div class="col-sm-5">
+                        <select name="semester" class="form-control">
+                            <?php foreach (['First Semester','Second Semester','Summer'] as $s): ?>
+                            <option value="<?php echo $s; ?>" <?php echo ($config && $config->semester === $s) ? 'selected' : ''; ?>>
+                                <?php echo $s; ?>
+                            </option>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
+                </div>
+                <div class="form-group row mb-3">
+                    <label class="col-sm-4 col-form-label"><strong>School Year</strong></label>
+                    <div class="col-sm-4">
+                        <input type="text" name="schoolyear" class="form-control" maxlength="20" required
+                               pattern="\d{4}\s*-\s*\d{4}" title="Two consecutive years, e.g. 2026-2027" placeholder="e.g. <?php echo date('Y') . '-' . (date('Y') + 1); ?>"
+                               value="<?php echo $config ? s($config->schoolyear) : date('Y') . '-' . (date('Y') + 1); ?>">
+                    </div>
+                </div>
+
+                <hr><h6 class="text-muted mb-3">- Course Information -</h6>
+
+                <?php
+                // [label, placeholder, maxlen, required, hint]
+                $fields = [
+                    'coursenumber'  => ['Subject and Course No.', 'e.g. CS 101', 50, true, ''],
+                    'descriptive'   => ['Descriptive Title',      'e.g. Computer Programming 1', 100, true, ''],
+                    'courseandyear' => ['Course and Year',         'e.g. BSCS 2A', 50, false, empty($coursegroups) ? '' : 'Overridden per section by the group name (see Per-Section Overrides).'],
+                    'schedule'      => ['Schedule of Classes',     'e.g. MWF 8:00-9:00 AM', 50, false, empty($coursegroups) ? '' : 'Course-wide default; sections can override it below.'],
+                ];
+                foreach ($fields as $fname => [$label, $placeholder, $maxlen, $req, $hint]):
+                ?>
+                <div class="form-group row mb-3">
+                    <label class="col-sm-4 col-form-label"><strong><?php echo $label; ?></strong><?php echo $req ? ' <span class="text-danger">*</span>' : ''; ?></label>
+                    <div class="col-sm-6">
+                        <input type="text" name="<?php echo $fname; ?>" class="form-control" maxlength="<?php echo $maxlen; ?>" <?php echo $req ? 'required' : ''; ?>
+                               value="<?php echo $config && isset($config->$fname) ? s($config->$fname) : ''; ?>"
+                               placeholder="<?php echo $placeholder; ?>">
+                        <?php if ($hint !== ''): ?><small class="form-text text-muted"><?php echo $hint; ?></small><?php endif; ?>
+                    </div>
+                </div>
+                <?php endforeach; ?>
+                <div class="form-group row mb-3">
+                    <label class="col-sm-4 col-form-label"><strong>Number of Units</strong> <span class="text-danger">*</span></label>
+                    <div class="col-sm-3">
+                        <input type="number" name="units" class="form-control" min="0" max="12" step="0.5" required placeholder="e.g. 3"
+                               value="<?php echo $config && isset($config->units) ? s($config->units) : '3'; ?>">
+                    </div>
+                </div>
+
+                <hr><h6 class="text-muted mb-1">- Signatories -</h6>
+                <p class="text-muted small mb-3">
+                    Leave a field <strong>blank</strong> to use the name auto-detected from Moodle roles
+                    (Instructor = the course/section teacher; the others = holders of the Department Head,
+                    Registrar and College Dean roles in this course's category tree or the site).
+                    Type a name only to override.
+                </p>
+
+                <?php
+                $sigs = [
+                    'instructor'      => 'Instructor',
+                    'department_head' => 'Department Head',
+                    'registrar'       => 'Registrar',
+                    'college_dean'    => 'College Dean',
+                ];
+                foreach ($sigs as $fname => $label):
+                    $stored  = ($config && isset($config->$fname)) ? (string)$config->$fname : '';
+                    $isblank = helper::signatory_is_blank($stored);
+                    $det     = $detected[$fname];
+                ?>
+                <div class="form-group row mb-3">
+                    <label class="col-sm-4 col-form-label"><strong><?php echo $label; ?></strong></label>
+                    <div class="col-sm-6">
+                        <input type="text" name="<?php echo $fname; ?>" id="sig-<?php echo $fname; ?>" class="form-control" maxlength="100"
+                               value="<?php echo $isblank ? '' : s($stored); ?>"
+                               placeholder="<?php echo $det['name'] !== '' ? s($det['name']) : 'Auto-detect (nothing found yet)'; ?>">
+                        <small class="form-text">
+                            <?php if ($det['name'] !== ''): ?>
+                                <span class="text-success">&#10003; Auto-detected: <strong><?php echo s($det['name']); ?></strong></span>
+                                <span class="text-muted">(<?php echo s($det['source']); ?>)</span>
+                                <?php if (!$isblank): ?>
+                                    &mdash; <span class="text-warning">overridden by the typed name</span>
+                                    <a href="#" onclick="document.getElementById('sig-<?php echo $fname; ?>').value=''; return false;">use auto-detect</a>
+                                <?php endif; ?>
+                            <?php else: ?>
+                                <span class="text-muted">&#9888; Not detected: <?php echo s($det['source']); ?>.<?php echo $isblank ? ' This line will print blank until a role is assigned or a name is typed.' : ''; ?></span>
+                            <?php endif; ?>
+                        </small>
+                    </div>
+                </div>
+                <?php endforeach; ?>
+
+                <button type="submit" class="btn btn-primary">Save Course Details</button>
+            </form>
+            <div class="gs-step-next text-right">
+                <a href="#computation-rules" class="btn btn-outline-primary btn-sm">Next: review computation rules &rarr;</a>
+            </div>
+        </div>
+    </div>
+
+    <!-- SECTION 1b: Computation Rules -->
+    <div class="card mb-4" id="computation-rules">
+        <div class="card-header bg-dark text-white">
+            <span class="gs-step-badge">5</span><strong>Computation Rules</strong> <span class="badge badge-light ml-2 ms-2">Optional</span><div class="gs-step-blurb">Optional switches for edge cases: ungraded work, hidden items, midterm/finals weighting and rounding. The defaults are safe; revisit before finalizing.</div>
+        </div>
+        <div class="card-body">
+            <p class="text-muted">
+                These switches control how the plugin turns gradebook scores into period grades. They apply to
+                every section of this course and are shown on the grade sheet page so faculty always know which
+                rules produced the numbers.
+            </p>
+            <form method="post">
+                <input type="hidden" name="action" value="saverules">
+                <input type="hidden" name="sesskey" value="<?php echo sesskey(); ?>">
+
+                <div class="form-check mb-2">
+                    <input type="checkbox" class="form-check-input" id="missingaszero" name="missingaszero" value="1"
+                           <?php echo $rules['missingaszero'] ? 'checked' : ''; ?>>
+                    <label class="form-check-label" for="missingaszero">
+                        <strong>Count ungraded items as 0%</strong>
+                        <br><small class="text-muted">Off: a mapped item with no grade is skipped, so a student who completed 1 of 5 quizzes is averaged over 1 quiz. On: missing work counts as zero. Turn this on when finalizing the official sheet.</small>
+                    </label>
+                </div>
+
+                <div class="form-check mb-2">
+                    <input type="checkbox" class="form-check-input" id="includehidden" name="includehidden" value="1"
+                           <?php echo $rules['includehidden'] ? 'checked' : ''; ?>>
+                    <label class="form-check-label" for="includehidden">
+                        <strong>Include hidden grade items in faculty computation</strong>
+                        <br><small class="text-muted">Items hidden from students in the gradebook still count on the faculty grade sheet and exports. The student's own view never includes hidden items.</small>
+                    </label>
+                </div>
+
+                <div class="form-check mb-3">
+                    <input type="checkbox" class="form-check-input" id="roundaverage" name="roundaverage" value="1"
+                           <?php echo $rules['roundaverage'] ? 'checked' : ''; ?>>
+                    <label class="form-check-label" for="roundaverage">
+                        <strong>Round averages to whole numbers before transmutation</strong>
+                        <br><small class="text-muted">Off: 89.6 transmutes as 89.6 (1.6). On: 89.6 rounds to 90 first (1.5). Match this to the Registrar's rule.</small>
+                    </label>
+                </div>
+
+                <div class="form-group row mb-3">
+                    <label class="col-sm-4 col-form-label" for="midtermweight"><strong>Midterm share of final average (%)</strong></label>
+                    <div class="col-sm-3">
+                        <input type="number" step="0.01" min="0" max="100" class="form-control" id="midtermweight" name="midtermweight"
+                               value="<?php echo s(rtrim(rtrim(number_format($rules['midtermweight'], 2), '0'), '.')); ?>" required>
+                    </div>
+                    <div class="col-sm-5 col-form-label">
+                        <small class="text-muted">Finals share is 100 minus this. 50 = equal weighting; 33.33 = one-third / two-thirds.</small>
+                    </div>
+                </div>
+
+                <button type="submit" class="btn btn-primary">Save Computation Rules</button>
+            </form>
+            <div class="gs-step-next text-right">
+                <a href="#section-overrides" class="btn btn-outline-primary btn-sm">Next: sections &rarr;</a>
+            </div>
+        </div>
+    </div>
+
+    <!-- SECTION 1c: Per-section overrides -->
+    <div class="card mb-4" id="section-overrides">
+        <div class="card-header bg-dark text-white">
+            <span class="gs-step-badge">6</span><strong>Per-Section Overrides</strong> <span class="badge badge-light ml-2 ms-2">Optional</span><div class="gs-step-blurb">Only needed when one Moodle course holds several sections (groups). Each section can print its own label, schedule and instructor.</div>
+        </div>
+        <div class="card-body">
+            <?php if (empty($coursegroups)): ?>
+                <?php echo \local_gradesheet\helper::render_alert("This course has no groups. If one Moodle course holds several sections, create one group per section (Participants &rarr; Groups); each group then gets its own grade sheet with its own section label, schedule and instructor line.", "secondary"); ?>
+            <?php else: ?>
+                <p class="text-muted">
+                    Each group is treated as a section. Leave a field blank to use the course-wide value from
+                    Course Details (section label defaults to the group name; instructor defaults to the group's
+                    teacher when there is exactly one). Grading categories, weights and the scale are shared by all sections.
+                </p>
+                <table class="table table-bordered table-sm mb-0">
+                    <thead class="thead-dark">
+                        <tr><th>Group / Section</th><th>Section label</th><th>Schedule</th><th>Instructor</th><th></th></tr>
+                    </thead>
+                    <tbody>
+                    <?php foreach ($coursegroups as $grp):
+                        $gc = $groupcfgs[$grp->id] ?? null; ?>
+                        <tr>
+                            <td>
+                                <form method="post" id="groupcfg<?php echo $grp->id; ?>">
+                                    <input type="hidden" name="action" value="savegroupcfg">
+                                    <input type="hidden" name="sesskey" value="<?php echo sesskey(); ?>">
+                                    <input type="hidden" name="groupid" value="<?php echo $grp->id; ?>">
+                                </form>
+                                <strong><?php echo s(format_string($grp->name)); ?></strong>
+                            </td>
+                            <td><input type="text" name="g_courseandyear" form="groupcfg<?php echo $grp->id; ?>" class="form-control form-control-sm" maxlength="50"
+                                       placeholder="<?php echo s(format_string($grp->name)); ?>" value="<?php echo $gc ? s($gc->courseandyear) : ''; ?>"></td>
+                            <td><input type="text" name="g_schedule" form="groupcfg<?php echo $grp->id; ?>" class="form-control form-control-sm" maxlength="50"
+                                       placeholder="<?php echo $config ? s($config->schedule) : ''; ?>" value="<?php echo $gc ? s($gc->schedule) : ''; ?>"></td>
+                            <td><input type="text" name="g_instructor" form="groupcfg<?php echo $grp->id; ?>" class="form-control form-control-sm" maxlength="100"
+                                       placeholder="<?php echo $config ? s($config->instructor) : ''; ?>" value="<?php echo $gc ? s($gc->instructor) : ''; ?>"></td>
+                            <td><button type="submit" form="groupcfg<?php echo $grp->id; ?>" class="btn btn-primary btn-sm">Save</button></td>
+                        </tr>
+                    <?php endforeach; ?>
+                    </tbody>
+                </table>
+            <?php endif; ?>
+            <div class="gs-step-next text-right">
+                <a href="#needs-attention" class="btn btn-outline-primary btn-sm">Back to top &rarr;</a>
+            </div>
+        </div>
+    </div>
+
 </div>
 
 <script>
+// If a "Fix" link or the step bar points inside a collapsed section, open it first.
+function gsRevealHash() {
+    var id = (location.hash || '').replace('#', '');
+    if (!id) { return; }
+    var el = document.getElementById(id);
+    if (!el) { return; }
+    var d = el.closest('details');
+    if (d && !d.open) { d.open = true; setTimeout(function () { el.scrollIntoView({block: 'start'}); }, 0); }
+}
+window.addEventListener('hashchange', gsRevealHash);
+window.addEventListener('load', gsRevealHash);
+function gsRowMapped(sel) {
+    var tr = sel.closest('tr');
+    var mapped = sel.value !== '0' && sel.value !== '';
+    tr.classList.toggle('table-warning', !mapped);
+    tr.setAttribute('data-gs-mapped', mapped ? '1' : '0');
+}
+function gsBulkCategory() {
+    var cat = document.getElementById('bulkCat').value;
+    if (!cat) { alert('Choose a category first.'); return; }
+    document.querySelectorAll('.gs-mapping-table tr[data-gs-mapped="0"] .gs-map-cat').forEach(function (sel) {
+        sel.value = cat; gsRowMapped(sel);
+    });
+}
+function gsBulkPeriod(period) {
+    document.querySelectorAll('.gs-mapping-table .gs-map-period').forEach(function (sel) { sel.value = period; });
+}
 var gsFormulaPresets = <?php echo json_encode($presets); ?>;
 function gsApplyPreset(key) {
     var p = gsFormulaPresets[key];
