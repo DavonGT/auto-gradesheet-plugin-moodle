@@ -732,6 +732,9 @@ $set_rules = function(array $overrides) use ($DB, $courseid_rules) {
 $set_rules([]);
 $r = helper::compute_student_grades($courseid_rules, 201);
 $T->assertEqual("Default: 3 of 5 mapped items graded (graded/mapped/missing exposed)", [$r['graded'], $r['mapped'], $r['missing']], [3, 5, 2]);
+$T->assertEqual("Default: per-period counts midterm 2/4, finals 1/1 (feeds the dashboard tabs)",
+    [$r['periodcounts']['midterm']['graded'], $r['periodcounts']['midterm']['mapped'], $r['periodcounts']['finals']['graded'], $r['periodcounts']['finals']['mapped']],
+    [2, 4, 1, 1]);
 // Midterm: Quizzes = 100 (only Quiz 1 counts), Exams = 80 -> 0.4*100 + 0.6*80 = 88
 $T->assertDelta("Default: midterm skips ungraded quizzes -> 88.0", $r['midterm'], 88.0);
 $T->assertDelta("Default: hidden midterm exam IS included for faculty", $r['midterm'], 88.0);

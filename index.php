@@ -341,20 +341,43 @@ if ($courseid) {
         echo '<div class="col-12"><small class="form-text text-muted" id="gradesheetSearchCount"></small></div>';
         echo '</div>';
 
-        echo '<table class="table table-bordered table-striped" id="gradesheetStudentTable">';
+        // Period tabs: one number per cell. Cells carry data-gs-period and the
+        // table's gs-period-* class decides which set is visible (see styles.css).
+        $mapcounts = $mapwarn ?? ['midterm' => 0, 'finals' => 0, 'unmapped' => 0];
+        echo '<ul class="nav nav-tabs gs-period-tabs mb-0" id="gradesheetPeriodTabs" role="tablist">';
+        foreach (['midterm' => 'Midterm', 'finals' => 'Finals', 'summary' => 'Summary'] as $pk => $plabel) {
+            $count = ($pk === 'summary') ? '' : ' <span class="badge badge-light border">' . (int)$mapcounts[$pk] . ' item' . ((int)$mapcounts[$pk] === 1 ? '' : 's') . '</span>';
+            echo '<li class="nav-item"><a href="#" class="nav-link" data-gs-tab="' . $pk . '" onclick="gradesheetShowPeriod(\'' . $pk . '\'); return false;" role="tab">' . $plabel . $count . '</a></li>';
+        }
+        echo '</ul>';
+
+        echo '<table class="table table-bordered table-striped gs-period-table" id="gradesheetStudentTable">';
         echo '<thead class="thead-dark"><tr>';
         echo '<th>#</th><th>Student ID</th><th>Student Name</th>';
 
-        if (!empty($categories)) {
-            foreach ($categories as $cat) {
-                echo '<th>' . s($cat->name) . ' (' . $cat->weight . '%)</th>';
+        // Midterm / Finals tabs: category averages for that period only.
+        foreach (['midterm', 'finals'] as $pk) {
+            if (!empty($categories)) {
+                foreach ($categories as $cat) {
+                    echo '<th data-gs-period="' . $pk . '">' . s($cat->name) . ' <small>(' . $cat->weight . '%)</small></th>';
+                }
             }
+            echo '<th data-gs-period="' . $pk . '" title="Graded items / mapped items in this period">Graded</th>';
+            echo '<th data-gs-period="' . $pk . '">' . ucfirst($pk) . ' Grade</th>';
+            echo '<th data-gs-period="' . $pk . '">Equivalent</th>';
         }
 
-        echo '<th title="Graded items / mapped items">Graded</th>';
-        echo '<th>Midterm</th><th>Finals</th><th>Average</th><th>Remarks</th><th>Status</th>';
+        // Summary tab: what goes on the official sheet.
+        echo '<th data-gs-period="summary" title="Graded items / mapped items">Graded</th>';
+        echo '<th data-gs-period="summary">Midterm</th><th data-gs-period="summary">Finals</th>';
+        echo '<th data-gs-period="summary">Average</th><th data-gs-period="summary">Remarks</th>';
+        echo '<th>Status</th>';
         echo '</tr></thead>';
         echo '<tbody>';
+
+        $numcats = count($categories);
+        // Columns per period tab (categories + graded + grade + equivalent); summary has 5.
+        $percols = $numcats + 3;
 
         $passcount = 0;
         $failcount = 0;
@@ -374,12 +397,15 @@ if ($courseid) {
 
                 // Faculty override: show dashes across the board instead of computed grades.
                 $othercount++;
-                $numcols = count($categories);
-                for ($c = 0; $c < $numcols; $c++) {
-                    echo '<td>-</td>';
+                foreach (['midterm', 'finals'] as $pk) {
+                    for ($c = 0; $c < $percols; $c++) {
+                        echo '<td data-gs-period="' . $pk . '">-</td>';
+                    }
                 }
-                echo '<td>-</td><td>-</td><td>-</td><td>-</td>';
-                echo '<td><span class="badge badge-secondary">' . s(helper::status_label($curstatus)) . '</span></td>';
+                for ($c = 0; $c < 4; $c++) {
+                    echo '<td data-gs-period="summary">-</td>';
+                }
+                echo '<td data-gs-period="summary"><span class="badge badge-secondary">' . s(helper::status_label($curstatus)) . '</span></td>';
             } else {
                 $g          = helper::compute_student_grades($courseid, $student->id);
                 $hasdata    = $g['remarks'] !== '';
@@ -397,30 +423,41 @@ if ($courseid) {
                     $failcount++;
                 }
 
-                if (!empty($categories)) {
-                    foreach ($categories as $cat) {
-                        $catdata = isset($g['cattotals'][$cat->id]) ? $g['cattotals'][$cat->id] : null;
-                        $midpart = ($catdata && $catdata['midcount'] > 0)
-                            ? number_format($catdata['midtotal'] / $catdata['midcount'], 0) . '%'
-                            : '-';
-                        $finpart = ($catdata && $catdata['fincount'] > 0)
-                            ? number_format($catdata['fintotal'] / $catdata['fincount'], 0) . '%'
-                            : '-';
-                        echo "<td>{$midpart}/{$finpart}</td>";
+                // Renders "graded/mapped" with a warning badge when items are missing.
+                $gradedcell = function (int $graded, int $mapped, string $period) use ($rules): string {
+                    $missing = $mapped - $graded;
+                    if ($mapped > 0 && $missing > 0) {
+                        $title = $missing . ' mapped item(s) ungraded' . ($rules['missingaszero'] ? ' (counted as 0%)' : ' (skipped)');
+                        return '<td data-gs-period="' . $period . '"><span class="badge badge-warning" title="' . s($title) . '">' . $graded . '/' . $mapped . '</span></td>';
                     }
+                    return '<td data-gs-period="' . $period . '">' . $graded . '/' . $mapped . '</td>';
+                };
+
+                // Midterm / Finals tabs.
+                foreach (['midterm', 'finals'] as $pk) {
+                    $tkey = ($pk === 'midterm') ? 'mid' : 'fin';
+                    if (!empty($categories)) {
+                        foreach ($categories as $cat) {
+                            $catdata = $g['cattotals'][$cat->id] ?? null;
+                            $cell = ($catdata && $catdata[$tkey . 'count'] > 0)
+                                ? number_format($catdata[$tkey . 'total'] / $catdata[$tkey . 'count'], 2) . '%'
+                                : '<span class="text-muted">-</span>';
+                            echo '<td data-gs-period="' . $pk . '">' . $cell . '</td>';
+                        }
+                    }
+                    echo $gradedcell($g['periodcounts'][$pk]['graded'], $g['periodcounts'][$pk]['mapped'], $pk);
+                    $pval = $g[$pk];
+                    echo '<td data-gs-period="' . $pk . '"><strong>' . ($pval === null ? '-' : number_format($pval, 2) . '%') . '</strong></td>';
+                    echo '<td data-gs-period="' . $pk . '">' . s(helper::transmute_equiv($pval, $courseid)) . '</td>';
                 }
 
-                // Graded/mapped indicator so faculty can see incomplete rosters.
-                if ($g['mapped'] > 0 && $g['missing'] > 0) {
-                    $gtitle = $g['missing'] . ' mapped item(s) ungraded' . ($rules['missingaszero'] ? ' (counted as 0%)' : ' (skipped)');
-                    echo '<td><span class="badge badge-warning" title="' . s($gtitle) . '">' . $g['graded'] . '/' . $g['mapped'] . '</span></td>';
-                } else {
-                    echo '<td>' . $g['graded'] . '/' . $g['mapped'] . '</td>';
-                }
-                echo '<td>' . s(helper::transmute_equiv($g['midterm'], $courseid)) . '</td>';
-                echo '<td>' . s(helper::transmute_equiv($g['finals'], $courseid)) . '</td>';
-                echo '<td>' . s($g['transmuted']) . '</td>';
-                echo '<td><span class="badge ' . $badgeclass . '">' . ($hasdata ? s($g['remarks']) : '-') . '</span></td>';
+                // Summary tab.
+                echo $gradedcell($g['graded'], $g['mapped'], 'summary');
+                echo '<td data-gs-period="summary">' . s(helper::transmute_equiv($g['midterm'], $courseid)) . '</td>';
+                echo '<td data-gs-period="summary">' . s(helper::transmute_equiv($g['finals'], $courseid)) . '</td>';
+                echo '<td data-gs-period="summary"><strong>' . s($g['transmuted']) . '</strong>'
+                    . ($g['average'] === null ? '' : ' <small class="text-muted">(' . number_format($g['average'], 2) . '%)</small>') . '</td>';
+                echo '<td data-gs-period="summary"><span class="badge ' . $badgeclass . '">' . ($hasdata ? s($g['remarks']) : '-') . '</span></td>';
             }
 
             // Status-setting control — editable for managers/editing teachers, read-only for non-editing teachers.
@@ -518,6 +555,23 @@ if ($courseid) {
                 statusSelect.value = "";
                 gradesheetFilterStudents();
             };
+
+            // Period tabs (Midterm / Finals / Summary). The chosen tab is
+            // remembered per course so faculty land where they left off.
+            var storageKey = "local_gradesheet_tab_' . $courseid . '";
+            var validTabs = ["midterm", "finals", "summary"];
+            window.gradesheetShowPeriod = function(period) {
+                if (validTabs.indexOf(period) === -1) { period = "midterm"; }
+                validTabs.forEach(function(p) { table.classList.remove("gs-period-" + p); });
+                table.classList.add("gs-period-" + period);
+                document.querySelectorAll("#gradesheetPeriodTabs [data-gs-tab]").forEach(function(a) {
+                    a.classList.toggle("active", a.getAttribute("data-gs-tab") === period);
+                });
+                try { localStorage.setItem(storageKey, period); } catch (e) {}
+            };
+            var initial = "midterm";
+            try { initial = localStorage.getItem(storageKey) || initial; } catch (e) {}
+            gradesheetShowPeriod(initial);
         })();
         </script>';
 

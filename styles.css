@@ -367,3 +367,39 @@
 .ms-2 { margin-left: 0.5rem !important; }
 
 
+
+/* ── Dashboard period tabs (Midterm / Finals / Summary) ───────────────── */
+.local-gradesheet-page .gs-period-tabs {
+    border-bottom: 0;
+}
+.local-gradesheet-page .gs-period-tabs .nav-link {
+    font-weight: 600;
+    color: #495057;
+    border: 1px solid #dee2e6;
+    border-bottom: 0;
+    background: #f1f3f5;
+    margin-right: 2px;
+}
+.local-gradesheet-page .gs-period-tabs .nav-link.active {
+    color: #fff;
+    background: #343a40;
+    border-color: #343a40;
+}
+.local-gradesheet-page .gs-period-tabs .nav-link .badge {
+    font-weight: 500;
+    margin-left: 4px;
+}
+/* Once JS has picked a tab, only that tab's cells are shown. Without JS
+   (or before it runs) every cell is visible, which is a safe fallback. */
+.local-gradesheet-page .gs-period-table[class*="gs-period-"] [data-gs-period] {
+    display: none;
+}
+.local-gradesheet-page .gs-period-table.gs-period-midterm [data-gs-period="midterm"],
+.local-gradesheet-page .gs-period-table.gs-period-finals  [data-gs-period="finals"],
+.local-gradesheet-page .gs-period-table.gs-period-summary [data-gs-period="summary"] {
+    display: table-cell;
+}
+.local-gradesheet-page .gs-period-table thead th[data-gs-period] small {
+    font-weight: 400;
+    opacity: 0.8;
+}

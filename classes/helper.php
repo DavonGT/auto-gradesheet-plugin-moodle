@@ -554,7 +554,7 @@ class helper {
      * @param int $courseid Course id.
      * @param int $studentid Student id.
      * @param bool $forstudent True when rendering the student's own view.
-     * @return array{midterm:?float, finals:?float, average:?float, cattotals:array, transmuted:string, remarks:string, graded:int, mapped:int, missing:int}
+     * @return array{midterm:?float, finals:?float, average:?float, cattotals:array, transmuted:string, remarks:string, graded:int, mapped:int, missing:int, periodcounts:array}
      */
     public static function compute_student_grades(int $courseid, int $studentid, bool $forstudent = false): array {
         self::prefetch_course_grades($courseid);
@@ -563,6 +563,10 @@ class helper {
         $includehidden = $rules['includehidden'] && !$forstudent;
         $graded = 0;
         $mapped = 0;
+        $periodcounts = [
+            'midterm' => ['graded' => 0, 'mapped' => 0],
+            'finals'  => ['graded' => 0, 'mapped' => 0],
+        ];
         
         $gitems     = $data['gitems'];
         $categories = $data['categories'];
@@ -613,10 +617,12 @@ class helper {
             }
 
             $mapped++;
+            $periodcounts[$period]['mapped']++;
             $hasgrade = $ggrade && $ggrade->finalgrade !== null && $ggrade->finalgrade !== '';
 
             if ($hasgrade) {
                 $graded++;
+                $periodcounts[$period]['graded']++;
                 $val = floatval($ggrade->finalgrade);
                 $max = floatval($gitem->grademax);
                 if ($max > 0 && $max != 100) {
@@ -702,6 +708,7 @@ class helper {
             'graded'     => $graded,
             'mapped'     => $mapped,
             'missing'    => $mapped - $graded,
+            'periodcounts' => $periodcounts,
             'cattotals'  => $cattotals,
             'transmuted' => self::transmute_equiv($average, $courseid),
             'remarks'    => ($average === null)
