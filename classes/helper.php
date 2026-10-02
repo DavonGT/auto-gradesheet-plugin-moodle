@@ -113,6 +113,10 @@ class helper {
                 'department_head' => 'DEPARTMENT HEAD',
                 'registrar'       => 'REGISTRAR NAME',
                 'college_dean'    => 'COLLEGE DEAN',
+                'missingaszero'   => 0,
+                'includehidden'   => 1,
+                'midtermweight'   => 50,
+                'roundaverage'    => 0,
             ];
             $configdata->id = $DB->insert_record('local_gradesheet_config', $configdata);
             $config = $configdata;
@@ -142,11 +146,13 @@ class helper {
     /**
      * Transmutes a raw percentage score (0-100) into its displayed value.
      *
-     * If the course has custom transmutation brackets defined, the raw score
-     * itself is returned (formatted to 2 decimals); the matched bracket only
-     * decides passing/failing via its 'ispassing' flag (see is_passing()).
-     * A score covered by no bracket returns '-'. Without a custom scale, the
-     * default ESSU scale applies ('1.0'-'5.0', with scores below 55 as '5.0').
+     * If the course has custom transmutation brackets defined, the matched
+     * bracket's 'equivalent' value is returned (e.g. '1.25' or 'A'). When the
+     * bracket has no equivalent, the raw score itself is returned formatted to
+     * 2 decimals. The bracket also decides passing/failing via 'ispassing'
+     * (see is_passing()). A score covered by no bracket returns '-'. Without a
+     * custom scale, the default ESSU scale applies ('1.0'-'5.0', with scores
+     * below 55 as '5.0').
      *
      * @param float|int|null|string $grade Raw score, or null/'' for "no grade".
      * @param int|null $courseid Course to check for a custom scale. Null = always default.
@@ -164,7 +170,8 @@ class helper {
             if (!empty($custom)) {
                 foreach ($custom as $row) {
                     if ($grade >= $row->minscore && $grade <= $row->maxscore) {
-                        return number_format($grade, 2);
+                        $equiv = trim((string)$row->equivalent);
+                        return $equiv !== '' ? $equiv : number_format($grade, 2);
                     }
                 }
                 // Custom scale is active but no bracket covers this score.
@@ -262,7 +269,85 @@ class helper {
             'depthead'      => ($config && !empty($config->department_head)) ? $config->department_head : '',
             'registrar'     => ($config && !empty($config->registrar))       ? $config->registrar       : '',
             'collegedean'   => ($config && !empty($config->college_dean))    ? $config->college_dean    : '',
+            'rules'         => self::get_computation_rules($courseid),
         ];
+    }
+
+    /** Per-request cache of computation rules, keyed by course id. */
+    private static $rulescache = [];
+
+    /**
+     * Computation rules for a course, with safe defaults when the config row
+     * is missing or predates the columns.
+     *
+     * @return array{missingaszero:bool, includehidden:bool, midtermweight:float, roundaverage:bool}
+     */
+    public static function get_computation_rules(int $courseid): array {
+        global $DB;
+        if (!isset(self::$rulescache[$courseid])) {
+            $config = $DB->get_record('local_gradesheet_config', ['courseid' => $courseid]);
+            $mw = ($config && isset($config->midtermweight)) ? floatval($config->midtermweight) : 50.0;
+            if ($mw < 0 || $mw > 100) {
+                $mw = 50.0;
+            }
+            self::$rulescache[$courseid] = [
+                'missingaszero' => $config ? !empty($config->missingaszero) : false,
+                'includehidden' => $config ? (!isset($config->includehidden) || !empty($config->includehidden)) : true,
+                'midtermweight' => $mw,
+                'roundaverage'  => $config ? !empty($config->roundaverage) : false,
+            ];
+        }
+        return self::$rulescache[$courseid];
+    }
+
+    /** Clears per-request caches after settings are saved. */
+    public static function reset_caches(): void {
+        self::$rulescache = [];
+        self::$transmutecache = [];
+        self::$course_grade_data = [];
+    }
+
+    /**
+     * Returns the per-section (group) header overrides, or null if none saved.
+     */
+    public static function get_group_overrides(int $courseid, int $groupid): ?\stdClass {
+        global $DB;
+        if ($groupid <= 0) {
+            return null;
+        }
+        $rec = $DB->get_record('local_gradesheet_groupcfg', ['courseid' => $courseid, 'groupid' => $groupid]);
+        return $rec ?: null;
+    }
+
+    /**
+     * Saves per-section header overrides. Empty strings mean "use the course value".
+     */
+    public static function set_group_overrides(int $courseid, int $groupid, array $fields): void {
+        global $DB;
+        if (!$DB->record_exists('groups', ['id' => $groupid, 'courseid' => $courseid])) {
+            return;
+        }
+        $data = (object)[
+            'courseid'      => $courseid,
+            'groupid'       => $groupid,
+            'courseandyear' => mb_substr(trim($fields['courseandyear'] ?? ''), 0, 50),
+            'schedule'      => mb_substr(trim($fields['schedule'] ?? ''), 0, 50),
+            'instructor'    => mb_substr(strtoupper(trim($fields['instructor'] ?? '')), 0, 100),
+            'timemodified'  => time(),
+        ];
+        $existing = $DB->get_record('local_gradesheet_groupcfg', ['courseid' => $courseid, 'groupid' => $groupid]);
+        if ($data->courseandyear === '' && $data->schedule === '' && $data->instructor === '') {
+            if ($existing) {
+                $DB->delete_records('local_gradesheet_groupcfg', ['id' => $existing->id]);
+            }
+            return;
+        }
+        if ($existing) {
+            $data->id = $existing->id;
+            $DB->update_record('local_gradesheet_groupcfg', $data);
+        } else {
+            $DB->insert_record('local_gradesheet_groupcfg', $data);
+        }
     }
 
     /**
@@ -390,11 +475,27 @@ class helper {
 
     private static $course_grade_data = [];
 
+    /**
+     * Make sure grade_grades.finalgrade is current before we read it.
+     * Moodle marks items with needsupdate=1 when a regrade is pending; the
+     * gradebook UI triggers that regrade lazily, so a direct table read could
+     * otherwise see stale totals.
+     */
+    private static function ensure_gradebook_current(int $courseid): void {
+        global $DB, $CFG;
+        if ($DB->record_exists('grade_items', ['courseid' => $courseid, 'needsupdate' => 1])) {
+            require_once($CFG->libdir . '/gradelib.php');
+            grade_regrade_final_grades($courseid);
+        }
+    }
+
     private static function prefetch_course_grades(int $courseid): void {
         global $DB;
         if (isset(self::$course_grade_data[$courseid])) {
             return;
         }
+
+        self::ensure_gradebook_current($courseid);
 
         $gitems = $DB->get_records_select(
             'grade_items',
@@ -441,13 +542,27 @@ class helper {
      * when both periods have data, otherwise whichever period has data, or
      * null when neither does.
      *
+     * Computation rules (see get_computation_rules()):
+     *  - includehidden: hidden grade items count for faculty; the student
+     *    view ($forstudent = true) never includes them.
+     *  - missingaszero: a mapped item with no grade counts as 0% instead of
+     *    being skipped.
+     *  - midtermweight: midterm share of the final average (default 50).
+     *  - roundaverage: round period and final averages to whole numbers
+     *    before transmutation and the pass/fail test.
+     *
      * @param int $courseid Course id.
      * @param int $studentid Student id.
-     * @return array{midterm:?float, finals:?float, average:?float, cattotals:array, transmuted:string, remarks:string}
+     * @param bool $forstudent True when rendering the student's own view.
+     * @return array{midterm:?float, finals:?float, average:?float, cattotals:array, transmuted:string, remarks:string, graded:int, mapped:int, missing:int}
      */
-    public static function compute_student_grades(int $courseid, int $studentid): array {
+    public static function compute_student_grades(int $courseid, int $studentid, bool $forstudent = false): array {
         self::prefetch_course_grades($courseid);
-        $data = self::$course_grade_data[$courseid];
+        $data  = self::$course_grade_data[$courseid];
+        $rules = self::get_computation_rules($courseid);
+        $includehidden = $rules['includehidden'] && !$forstudent;
+        $graded = 0;
+        $mapped = 0;
         
         $gitems     = $data['gitems'];
         $categories = $data['categories'];
@@ -468,42 +583,52 @@ class helper {
         $periodcats = ['midterm' => [], 'finals' => []];
 
         foreach ($gitems as $gitem) {
+            // Items not mapped to an existing category never count, graded or not.
+            $map    = $maps[$gitem->id] ?? null;
+            $period = ($map && $map->period === 'midterm') ? 'midterm' : 'finals';
+            $catid  = $map ? (int)$map->categoryid : 0;
+            if (!$catid || !isset($cattotals[$catid])) {
+                continue;
+            }
+
             $gi = new \grade_item((array)$gitem, false);
-            if ($gi->is_hidden()) {
+            if (!$includehidden && $gi->is_hidden()) {
                 continue;
             }
 
             $parentcat = $gi->get_parent_category();
-            if ($parentcat && method_exists($parentcat, 'is_hidden') && $parentcat->is_hidden()) {
+            if (!$includehidden && $parentcat && method_exists($parentcat, 'is_hidden') && $parentcat->is_hidden()) {
                 continue;
             }
 
             $ggrade = $grades[$gitem->id][$studentid] ?? null;
             if ($ggrade) {
                 $gg = new \grade_grade((array)$ggrade, false);
-                if ($gg->is_hidden() || $gg->is_excluded()) {
+                if ($gg->is_excluded()) {
+                    continue; // Teacher explicitly excluded this grade: never counts.
+                }
+                if (!$includehidden && $gg->is_hidden()) {
                     continue;
                 }
             }
 
-            // Exclude empty/ungraded items so future or uncompleted activities
-            // do not pull down the student's average as 0%.
-            if (!$ggrade || $ggrade->finalgrade === null || $ggrade->finalgrade === '') {
-                continue;
-            }
+            $mapped++;
+            $hasgrade = $ggrade && $ggrade->finalgrade !== null && $ggrade->finalgrade !== '';
 
-            $val = floatval($ggrade->finalgrade);
-
-            $max = floatval($gitem->grademax);
-            if ($max > 0 && $max != 100) {
-                $val = ($val / $max) * 100;
-            }
-
-            $map    = $maps[$gitem->id] ?? null;
-            $period = ($map && $map->period === 'midterm') ? 'midterm' : 'finals';
-            $catid  = $map ? (int)$map->categoryid : 0;
-
-            if (!$catid || !isset($cattotals[$catid])) {
+            if ($hasgrade) {
+                $graded++;
+                $val = floatval($ggrade->finalgrade);
+                $max = floatval($gitem->grademax);
+                if ($max > 0 && $max != 100) {
+                    $val = ($val / $max) * 100;
+                }
+            } else if ($rules['missingaszero']) {
+                // Ungraded mapped item counts as 0% (faculty opted in).
+                $val = 0.0;
+            } else {
+                // Default: skip ungraded items so future or uncompleted
+                // activities do not pull the average down. The graded/mapped
+                // counts let the UI flag this.
                 continue;
             }
 
@@ -550,8 +675,14 @@ class helper {
         $mid = $periodvals['midterm'];
         $fin = $periodvals['finals'];
 
+        if ($rules['roundaverage']) {
+            $mid = ($mid === null) ? null : (float)round($mid);
+            $fin = ($fin === null) ? null : (float)round($fin);
+        }
+
         if ($mid !== null && $fin !== null) {
-            $average = ($mid + $fin) / 2;
+            $w = $rules['midtermweight'] / 100;
+            $average = $mid * $w + $fin * (1 - $w);
         } else if ($mid !== null) {
             $average = $mid;
         } else if ($fin !== null) {
@@ -560,10 +691,17 @@ class helper {
             $average = null;
         }
 
+        if ($rules['roundaverage'] && $average !== null) {
+            $average = (float)round($average);
+        }
+
         return [
             'midterm'    => $mid,
             'finals'     => $fin,
             'average'    => $average,
+            'graded'     => $graded,
+            'mapped'     => $mapped,
+            'missing'    => $mapped - $graded,
             'cattotals'  => $cattotals,
             'transmuted' => self::transmute_equiv($average, $courseid),
             'remarks'    => ($average === null)

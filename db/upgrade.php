@@ -144,5 +144,38 @@ function xmldb_local_gradesheet_upgrade($oldversion) {
         upgrade_plugin_savepoint(true, 2026091600, 'local', 'gradesheet');
     }
 
+    if ($oldversion < 2026100200) {
+        // Computation rule switches on the course config.
+        $table = new xmldb_table('local_gradesheet_config');
+        $fields = [
+            new xmldb_field('missingaszero', XMLDB_TYPE_INTEGER, '1', null, XMLDB_NOTNULL, null, '0', 'college_dean'),
+            new xmldb_field('includehidden', XMLDB_TYPE_INTEGER, '1', null, XMLDB_NOTNULL, null, '1', 'missingaszero'),
+            new xmldb_field('midtermweight', XMLDB_TYPE_NUMBER, '5, 2', null, XMLDB_NOTNULL, null, '50', 'includehidden'),
+            new xmldb_field('roundaverage', XMLDB_TYPE_INTEGER, '1', null, XMLDB_NOTNULL, null, '0', 'midtermweight'),
+        ];
+        foreach ($fields as $field) {
+            if (!$dbman->field_exists($table, $field)) {
+                $dbman->add_field($table, $field);
+            }
+        }
+
+        // Per-section (group) header overrides.
+        $table = new xmldb_table('local_gradesheet_groupcfg');
+        $table->add_field('id', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, XMLDB_SEQUENCE, null);
+        $table->add_field('courseid', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, null, null);
+        $table->add_field('groupid', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, null, null);
+        $table->add_field('courseandyear', XMLDB_TYPE_CHAR, '50', null, null, null, '');
+        $table->add_field('schedule', XMLDB_TYPE_CHAR, '50', null, null, null, '');
+        $table->add_field('instructor', XMLDB_TYPE_CHAR, '100', null, null, null, '');
+        $table->add_field('timemodified', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, null, '0');
+        $table->add_key('primary', XMLDB_KEY_PRIMARY, ['id']);
+        $table->add_index('courseid_groupid', XMLDB_INDEX_UNIQUE, ['courseid', 'groupid']);
+        if (!$dbman->table_exists($table)) {
+            $dbman->create_table($table);
+        }
+
+        upgrade_plugin_savepoint(true, 2026100200, 'local', 'gradesheet');
+    }
+
     return true;
 }

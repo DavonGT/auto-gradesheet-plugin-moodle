@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8" ?>
-<XMLDB PATH="local/gradesheet/db" VERSION="20260313"
+<XMLDB PATH="local/gradesheet/db" VERSION="20261002"
     COMMENT="Grade Sheet Generator tables">
     <TABLES>
         <TABLE NAME="local_gradesheet_config" COMMENT="Grading formula config per course">
@@ -19,6 +19,10 @@
                 <FIELD NAME="department_head" TYPE="char"  LENGTH="100" NOTNULL="false" DEFAULT=""/>
                 <FIELD NAME="registrar"      TYPE="char"   LENGTH="100" NOTNULL="false" DEFAULT=""/>
                 <FIELD NAME="college_dean"   TYPE="char"   LENGTH="100" NOTNULL="false" DEFAULT=""/>
+                <FIELD NAME="missingaszero"  TYPE="int"    LENGTH="1"   NOTNULL="true"  DEFAULT="0" COMMENT="1 = ungraded mapped items count as 0%"/>
+                <FIELD NAME="includehidden"  TYPE="int"    LENGTH="1"   NOTNULL="true"  DEFAULT="1" COMMENT="1 = hidden grade items are included in faculty computation"/>
+                <FIELD NAME="midtermweight"  TYPE="number" LENGTH="5"   DECIMALS="2" NOTNULL="true" DEFAULT="50" COMMENT="Midterm share of the final average, in percent"/>
+                <FIELD NAME="roundaverage"   TYPE="int"    LENGTH="1"   NOTNULL="true"  DEFAULT="0" COMMENT="1 = round period/final averages to whole numbers before transmutation"/>
             </FIELDS>
             <KEYS>
                 <KEY NAME="primary" TYPE="primary" FIELDS="id"/>
@@ -89,6 +93,23 @@
             </KEYS>
             <INDEXES>
                 <INDEX NAME="courseid-userid" UNIQUE="true" FIELDS="courseid, userid"/>
+            </INDEXES>
+        </TABLE>
+        <TABLE NAME="local_gradesheet_groupcfg" COMMENT="Per-section (Moodle group) report header overrides">
+            <FIELDS>
+                <FIELD NAME="id"            TYPE="int"  LENGTH="10"  NOTNULL="true" SEQUENCE="true"/>
+                <FIELD NAME="courseid"      TYPE="int"  LENGTH="10"  NOTNULL="true"/>
+                <FIELD NAME="groupid"       TYPE="int"  LENGTH="10"  NOTNULL="true"/>
+                <FIELD NAME="courseandyear" TYPE="char" LENGTH="50"  NOTNULL="false" DEFAULT=""/>
+                <FIELD NAME="schedule"      TYPE="char" LENGTH="50"  NOTNULL="false" DEFAULT=""/>
+                <FIELD NAME="instructor"    TYPE="char" LENGTH="100" NOTNULL="false" DEFAULT=""/>
+                <FIELD NAME="timemodified"  TYPE="int"  LENGTH="10"  NOTNULL="true" DEFAULT="0"/>
+            </FIELDS>
+            <KEYS>
+                <KEY NAME="primary" TYPE="primary" FIELDS="id"/>
+            </KEYS>
+            <INDEXES>
+                <INDEX NAME="courseid_groupid" UNIQUE="true" FIELDS="courseid, groupid"/>
             </INDEXES>
         </TABLE>
     </TABLES>

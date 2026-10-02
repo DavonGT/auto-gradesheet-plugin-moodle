@@ -11,6 +11,10 @@ $observers = [
         'callback'  => '\local_gradesheet\observer::course_deleted',
     ],
     [
+        'eventname' => '\core\event\group_deleted',
+        'callback'  => '\local_gradesheet\observer::group_deleted',
+    ],
+    [
         'eventname' => '\core\event\user_deleted',
         'callback'  => '\local_gradesheet\observer::user_deleted',
     ],

@@ -29,6 +29,17 @@ class gradesheet_service {
                     }
                 }
             }
+
+            // Per-section overrides saved in Settings win over the derived
+            // values above and over the course-wide config.
+            $override = helper::get_group_overrides($courseid, $groupid);
+            if ($override) {
+                foreach (['courseandyear', 'schedule', 'instructor'] as $f) {
+                    if (!empty($override->$f)) {
+                        $cfg[$f] = $override->$f;
+                    }
+                }
+            }
         }
 
         $categories = $DB->get_records('local_gradesheet_categories',
@@ -55,6 +66,9 @@ class gradesheet_service {
                     'remarks'   => helper::status_label($status),
                     'cattotals' => [],
                     'status'    => $status,
+                    'graded'    => 0,
+                    'mapped'    => 0,
+                    'missing'   => 0,
                 ];
                 continue;
             }
@@ -82,6 +96,9 @@ class gradesheet_service {
                 'remarks'   => $remarks,
                 'cattotals' => $g['cattotals'],
                 'status'    => '',
+                'graded'    => $g['graded'],
+                'mapped'    => $g['mapped'],
+                'missing'   => $g['missing'],
             ];
         }
 

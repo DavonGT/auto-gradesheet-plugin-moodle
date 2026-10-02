@@ -35,6 +35,20 @@ class observer {
             $DB->delete_records('local_gradesheet_itemmap', ['courseid' => $courseid]);
             $DB->delete_records('local_gradesheet_transmute', ['courseid' => $courseid]);
             $DB->delete_records('local_gradesheet_status', ['courseid' => $courseid]);
+            $DB->delete_records('local_gradesheet_groupcfg', ['courseid' => $courseid]);
+        }
+    }
+
+    /**
+     * Triggered when a group is deleted: drop its section overrides.
+     *
+     * @param \core\event\group_deleted $event
+     */
+    public static function group_deleted(\core\event\group_deleted $event) {
+        global $DB;
+        $groupid = $event->objectid;
+        if ($groupid > 0) {
+            $DB->delete_records('local_gradesheet_groupcfg', ['groupid' => $groupid]);
         }
     }
 

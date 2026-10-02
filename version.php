@@ -2,7 +2,7 @@
 defined('MOODLE_INTERNAL') || die();
 
 $plugin->component = 'local_gradesheet';
-$plugin->version   = 2026100100;
+$plugin->version   = 2026100200;
 $plugin->requires  = 2020061500;
 $plugin->maturity  = MATURITY_STABLE;
-$plugin->release   = '1.7';
+$plugin->release   = '1.8';

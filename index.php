@@ -135,7 +135,7 @@ if ($courseid) {
             exit;
         }
 
-        $grades = helper::compute_student_grades($courseid, $USER->id);
+        $grades = helper::compute_student_grades($courseid, $USER->id, true);
         $mystatus = helper::get_student_status($courseid, $USER->id);
 
         if ($mystatus !== '') {
@@ -237,6 +237,7 @@ if ($courseid) {
         $students  = helper::get_non_teaching_students($context, $groupid);
         $statusmap = helper::get_status_map($courseid);
         $statusoptions = helper::status_options();
+        $rules     = helper::get_computation_rules($courseid);
 
         $safecoursename = s(format_string($coursename));
         echo '<hr>';
@@ -282,6 +283,17 @@ if ($courseid) {
             }
             echo '</div></div>';
         }
+
+        // Make the active computation rules visible so faculty know how the
+        // numbers on this page were produced.
+        $rulesparts = [];
+        $rulesparts[] = 'Ungraded items: <strong>' . ($rules['missingaszero'] ? 'counted as 0%' : 'skipped') . '</strong>';
+        $rulesparts[] = 'Hidden items: <strong>' . ($rules['includehidden'] ? 'included' : 'excluded') . '</strong>';
+        $rulesparts[] = 'Final average: <strong>' . rtrim(rtrim(number_format($rules['midtermweight'], 2), '0'), '.') . '% Midterm / '
+            . rtrim(rtrim(number_format(100 - $rules['midtermweight'], 2), '0'), '.') . '% Finals</strong>';
+        $rulesparts[] = 'Rounding before transmutation: <strong>' . ($rules['roundaverage'] ? 'whole number' : 'none') . '</strong>';
+        echo helper::render_alert(implode(' &middot; ', $rulesparts), 'secondary', '&#8505;',
+            $canmanage ? '<a href="course_settings.php?courseid=' . $courseid . '#computation-rules" class="btn btn-light btn-sm">Change</a>' : '');
 
         if ($canmanage) {
             $groupparam = ($groupid > 0) ? '&group=' . $groupid : '';
@@ -339,6 +351,7 @@ if ($courseid) {
             }
         }
 
+        echo '<th title="Graded items / mapped items">Graded</th>';
         echo '<th>Midterm</th><th>Finals</th><th>Average</th><th>Remarks</th><th>Status</th>';
         echo '</tr></thead>';
         echo '<tbody>';
@@ -365,7 +378,7 @@ if ($courseid) {
                 for ($c = 0; $c < $numcols; $c++) {
                     echo '<td>-</td>';
                 }
-                echo '<td>-</td><td>-</td><td>-</td>';
+                echo '<td>-</td><td>-</td><td>-</td><td>-</td>';
                 echo '<td><span class="badge badge-secondary">' . s(helper::status_label($curstatus)) . '</span></td>';
             } else {
                 $g          = helper::compute_student_grades($courseid, $student->id);
@@ -397,6 +410,13 @@ if ($courseid) {
                     }
                 }
 
+                // Graded/mapped indicator so faculty can see incomplete rosters.
+                if ($g['mapped'] > 0 && $g['missing'] > 0) {
+                    $gtitle = $g['missing'] . ' mapped item(s) ungraded' . ($rules['missingaszero'] ? ' (counted as 0%)' : ' (skipped)');
+                    echo '<td><span class="badge badge-warning" title="' . s($gtitle) . '">' . $g['graded'] . '/' . $g['mapped'] . '</span></td>';
+                } else {
+                    echo '<td>' . $g['graded'] . '/' . $g['mapped'] . '</td>';
+                }
                 echo '<td>' . s(helper::transmute_equiv($g['midterm'], $courseid)) . '</td>';
                 echo '<td>' . s(helper::transmute_equiv($g['finals'], $courseid)) . '</td>';
                 echo '<td>' . s($g['transmuted']) . '</td>';

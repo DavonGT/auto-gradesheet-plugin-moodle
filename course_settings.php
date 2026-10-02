@@ -75,6 +75,38 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             \core\output\notification::NOTIFY_SUCCESS);
     }
 
+    // Save computation rules
+    if ($action === 'saverules') {
+        helper::ensure_course_defaults($courseid);
+        $existing = $DB->get_record('local_gradesheet_config', ['courseid' => $courseid], '*', MUST_EXIST);
+        $mw = optional_param('midtermweight', 50, PARAM_FLOAT);
+        if ($mw < 0 || $mw > 100) {
+            redirect(new moodle_url('/local/gradesheet/course_settings.php', ['courseid' => $courseid], 'computation-rules'),
+                'Midterm weight must be between 0 and 100.', null, \core\output\notification::NOTIFY_ERROR);
+        }
+        $existing->missingaszero = optional_param('missingaszero', 0, PARAM_INT) ? 1 : 0;
+        $existing->includehidden = optional_param('includehidden', 0, PARAM_INT) ? 1 : 0;
+        $existing->midtermweight = round($mw, 2);
+        $existing->roundaverage  = optional_param('roundaverage', 0, PARAM_INT) ? 1 : 0;
+        $existing->timemodified  = time();
+        $DB->update_record('local_gradesheet_config', $existing);
+        helper::reset_caches();
+        redirect(new moodle_url('/local/gradesheet/course_settings.php', ['courseid' => $courseid], 'computation-rules'),
+            'Computation rules saved!', null, \core\output\notification::NOTIFY_SUCCESS);
+    }
+
+    // Save per-section (group) header overrides
+    if ($action === 'savegroupcfg') {
+        $gid = required_param('groupid', PARAM_INT);
+        helper::set_group_overrides($courseid, $gid, [
+            'courseandyear' => optional_param('g_courseandyear', '', PARAM_TEXT),
+            'schedule'      => optional_param('g_schedule', '', PARAM_TEXT),
+            'instructor'    => optional_param('g_instructor', '', PARAM_TEXT),
+        ]);
+        redirect(new moodle_url('/local/gradesheet/course_settings.php', ['courseid' => $courseid], 'section-overrides'),
+            'Section overrides saved!', null, \core\output\notification::NOTIFY_SUCCESS);
+    }
+
     // Add a new category
     if ($action === 'addcategory') {
         $name   = mb_substr(required_param('catname',   PARAM_TEXT), 0, 100);
@@ -150,6 +182,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $min   = required_param('tmin', PARAM_FLOAT);
         $max   = required_param('tmax', PARAM_FLOAT);
         $desc  = mb_substr(required_param('tdesc', PARAM_TEXT), 0, 100);
+        $equiv = mb_substr(trim(optional_param('tequiv', '', PARAM_TEXT)), 0, 10);
         $ispassing = optional_param('tispassing', 0, PARAM_INT) ? 1 : 0;
         if ($max < $min) {
             redirect($scaleurl, 'Max score must be greater than or equal to min score.', null,
@@ -160,7 +193,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             'courseid'   => $courseid,
             'minscore'   => $min,
             'maxscore'   => $max,
-            'equivalent' => '',
+            'equivalent' => $equiv,
             'descriptor' => $desc,
             'sortorder'  => $sortorder,
             'ispassing'  => $ispassing,
@@ -174,6 +207,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $min   = required_param('tmin', PARAM_FLOAT);
         $max   = required_param('tmax', PARAM_FLOAT);
         $desc  = mb_substr(required_param('tdesc', PARAM_TEXT), 0, 100);
+        $equiv = mb_substr(trim(optional_param('tequiv', '', PARAM_TEXT)), 0, 10);
         $ispassing = optional_param('tispassing', 0, PARAM_INT) ? 1 : 0;
 
         $row = $DB->get_record('local_gradesheet_transmute', ['id' => $tid, 'courseid' => $courseid]);
@@ -187,7 +221,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
         $row->minscore   = $min;
         $row->maxscore   = $max;
-        $row->equivalent = '';
+        $row->equivalent = $equiv;
         $row->descriptor = $desc;
         $row->ispassing  = $ispassing;
         $DB->update_record('local_gradesheet_transmute', $row);
@@ -242,6 +276,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
 // ── LOAD DATA ─────────────────────────────────────────────────────────────────
 $config     = $DB->get_record('local_gradesheet_config', ['courseid' => $courseid]);
+$rules      = helper::get_computation_rules($courseid);
+$coursegroups = groups_get_all_groups($courseid);
+$groupcfgs  = [];
+foreach ($DB->get_records('local_gradesheet_groupcfg', ['courseid' => $courseid]) as $gc) {
+    $groupcfgs[$gc->groupid] = $gc;
+}
 $categories = $DB->get_records('local_gradesheet_categories', ['courseid' => $courseid], 'sortorder ASC');
 $editcatid = optional_param('editcatid', 0, PARAM_INT);
 $editcategory = $editcatid ? $DB->get_record('local_gradesheet_categories', ['id' => $editcatid, 'courseid' => $courseid]) : null;
@@ -349,6 +389,109 @@ echo '<div class="local-gradesheet-page">';
 
                 <button type="submit" class="btn btn-primary">Save Course Details</button>
             </form>
+        </div>
+    </div>
+
+    <!-- SECTION 1b: Computation Rules -->
+    <div class="card mb-4" id="computation-rules">
+        <div class="card-header bg-dark text-white">
+            <strong>Computation Rules</strong>
+        </div>
+        <div class="card-body">
+            <p class="text-muted">
+                These switches control how the plugin turns gradebook scores into period grades. They apply to
+                every section of this course and are shown on the grade sheet page so faculty always know which
+                rules produced the numbers.
+            </p>
+            <form method="post">
+                <input type="hidden" name="action" value="saverules">
+                <input type="hidden" name="sesskey" value="<?php echo sesskey(); ?>">
+
+                <div class="form-check mb-2">
+                    <input type="checkbox" class="form-check-input" id="missingaszero" name="missingaszero" value="1"
+                           <?php echo $rules['missingaszero'] ? 'checked' : ''; ?>>
+                    <label class="form-check-label" for="missingaszero">
+                        <strong>Count ungraded items as 0%</strong>
+                        <br><small class="text-muted">Off: a mapped item with no grade is skipped, so a student who completed 1 of 5 quizzes is averaged over 1 quiz. On: missing work counts as zero. Turn this on when finalizing the official sheet.</small>
+                    </label>
+                </div>
+
+                <div class="form-check mb-2">
+                    <input type="checkbox" class="form-check-input" id="includehidden" name="includehidden" value="1"
+                           <?php echo $rules['includehidden'] ? 'checked' : ''; ?>>
+                    <label class="form-check-label" for="includehidden">
+                        <strong>Include hidden grade items in faculty computation</strong>
+                        <br><small class="text-muted">Items hidden from students in the gradebook still count on the faculty grade sheet and exports. The student's own view never includes hidden items.</small>
+                    </label>
+                </div>
+
+                <div class="form-check mb-3">
+                    <input type="checkbox" class="form-check-input" id="roundaverage" name="roundaverage" value="1"
+                           <?php echo $rules['roundaverage'] ? 'checked' : ''; ?>>
+                    <label class="form-check-label" for="roundaverage">
+                        <strong>Round averages to whole numbers before transmutation</strong>
+                        <br><small class="text-muted">Off: 89.6 transmutes as 89.6 (1.6). On: 89.6 rounds to 90 first (1.5). Match this to the Registrar's rule.</small>
+                    </label>
+                </div>
+
+                <div class="form-group row mb-3">
+                    <label class="col-sm-4 col-form-label" for="midtermweight"><strong>Midterm share of final average (%)</strong></label>
+                    <div class="col-sm-3">
+                        <input type="number" step="0.01" min="0" max="100" class="form-control" id="midtermweight" name="midtermweight"
+                               value="<?php echo s(rtrim(rtrim(number_format($rules['midtermweight'], 2), '0'), '.')); ?>" required>
+                    </div>
+                    <div class="col-sm-5 col-form-label">
+                        <small class="text-muted">Finals share is 100 minus this. 50 = equal weighting; 33.33 = one-third / two-thirds.</small>
+                    </div>
+                </div>
+
+                <button type="submit" class="btn btn-primary">Save Computation Rules</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- SECTION 1c: Per-section overrides -->
+    <div class="card mb-4" id="section-overrides">
+        <div class="card-header bg-dark text-white">
+            <strong>Per-Section Overrides</strong>
+        </div>
+        <div class="card-body">
+            <?php if (empty($coursegroups)): ?>
+                <?php echo \local_gradesheet\helper::render_alert("This course has no groups. If one Moodle course holds several sections, create one group per section (Participants &rarr; Groups); each group then gets its own grade sheet with its own section label, schedule and instructor line.", "secondary"); ?>
+            <?php else: ?>
+                <p class="text-muted">
+                    Each group is treated as a section. Leave a field blank to use the course-wide value from
+                    Course Details (section label defaults to the group name; instructor defaults to the group's
+                    teacher when there is exactly one). Grading categories, weights and the scale are shared by all sections.
+                </p>
+                <table class="table table-bordered table-sm mb-0">
+                    <thead class="thead-dark">
+                        <tr><th>Group / Section</th><th>Section label</th><th>Schedule</th><th>Instructor</th><th></th></tr>
+                    </thead>
+                    <tbody>
+                    <?php foreach ($coursegroups as $grp):
+                        $gc = $groupcfgs[$grp->id] ?? null; ?>
+                        <tr>
+                            <td>
+                                <form method="post" id="groupcfg<?php echo $grp->id; ?>">
+                                    <input type="hidden" name="action" value="savegroupcfg">
+                                    <input type="hidden" name="sesskey" value="<?php echo sesskey(); ?>">
+                                    <input type="hidden" name="groupid" value="<?php echo $grp->id; ?>">
+                                </form>
+                                <strong><?php echo s(format_string($grp->name)); ?></strong>
+                            </td>
+                            <td><input type="text" name="g_courseandyear" form="groupcfg<?php echo $grp->id; ?>" class="form-control form-control-sm" maxlength="50"
+                                       placeholder="<?php echo s(format_string($grp->name)); ?>" value="<?php echo $gc ? s($gc->courseandyear) : ''; ?>"></td>
+                            <td><input type="text" name="g_schedule" form="groupcfg<?php echo $grp->id; ?>" class="form-control form-control-sm" maxlength="50"
+                                       placeholder="<?php echo $config ? s($config->schedule) : ''; ?>" value="<?php echo $gc ? s($gc->schedule) : ''; ?>"></td>
+                            <td><input type="text" name="g_instructor" form="groupcfg<?php echo $grp->id; ?>" class="form-control form-control-sm" maxlength="100"
+                                       placeholder="<?php echo $config ? s($config->instructor) : ''; ?>" value="<?php echo $gc ? s($gc->instructor) : ''; ?>"></td>
+                            <td><button type="submit" form="groupcfg<?php echo $grp->id; ?>" class="btn btn-primary btn-sm">Save</button></td>
+                        </tr>
+                    <?php endforeach; ?>
+                    </tbody>
+                </table>
+            <?php endif; ?>
         </div>
     </div>
 
@@ -584,6 +727,7 @@ echo '<div class="local-gradesheet-page">';
                     <tr>
                         <th>Min Score</th>
                         <th>Max Score</th>
+                        <th>Equivalent</th>
                         <th>Descriptor</th>
                         <?php if ($usingcustomscale): ?><th>Passing?</th><?php endif; ?>
                         <?php if ($usingcustomscale): ?><th>Action</th><?php endif; ?>
@@ -597,6 +741,7 @@ echo '<div class="local-gradesheet-page">';
                         <tr id="scale-view-<?php echo $row->id; ?>" class="scale-view-row" style="<?php echo $is_editing_scale ? 'display:none;' : ''; ?>">
                             <td><?php echo s($row->minscore); ?></td>
                             <td><?php echo s($row->maxscore); ?></td>
+                            <td><?php echo trim((string)$row->equivalent) !== '' ? s($row->equivalent) : '<span class="text-muted">raw score</span>'; ?></td>
                             <td><?php echo s($row->descriptor); ?></td>
                             <td><?php echo $row->ispassing ? '<span class="badge badge-success">Yes</span>' : '<span class="badge badge-secondary">No</span>'; ?></td>
                             <td>
@@ -625,6 +770,11 @@ echo '<div class="local-gradesheet-page">';
                                        value="<?php echo s($row->maxscore); ?>" data-original="<?php echo s($row->maxscore); ?>" required>
                             </td>
                             <td>
+                                <input type="text" name="tequiv" id="scaleequiv-<?php echo $row->id; ?>" class="form-control form-control-sm" maxlength="10"
+                                       form="edittransmuteform<?php echo $row->id; ?>" placeholder="e.g. 1.25"
+                                       value="<?php echo s($row->equivalent); ?>" data-original="<?php echo s($row->equivalent); ?>">
+                            </td>
+                            <td>
                                 <input type="text" name="tdesc" id="scaledesc-<?php echo $row->id; ?>" class="form-control form-control-sm" maxlength="100"
                                        form="edittransmuteform<?php echo $row->id; ?>"
                                        value="<?php echo s($row->descriptor); ?>" data-original="<?php echo s($row->descriptor); ?>">
@@ -647,7 +797,8 @@ echo '<div class="local-gradesheet-page">';
                         <?php foreach ($displaylegend as $lrow): ?>
                         <tr class="text-muted">
                             <td colspan="2"><?php echo s($lrow[0]); ?></td>
-                            <td colspan="3"><?php echo s($lrow[2]); ?></td>
+                            <td><?php echo s($lrow[1]); ?></td>
+                            <td colspan="2"><?php echo s($lrow[2]); ?></td>
                         </tr>
                         <?php endforeach; ?>
                     <?php endif; ?>
@@ -668,6 +819,10 @@ echo '<div class="local-gradesheet-page">';
                     <div class="col-md-3">
                         <label><strong>Max Score</strong></label>
                         <input type="number" step="0.01" name="tmax" class="form-control" placeholder="e.g. 100" required>
+                    </div>
+                    <div class="col-md-2">
+                        <label><strong>Equivalent</strong></label>
+                        <input type="text" name="tequiv" class="form-control" maxlength="10" placeholder="e.g. 1.25">
                     </div>
                     <div class="col-md-4">
                         <label><strong>Descriptor</strong></label>
@@ -733,6 +888,7 @@ function toggleEditScale(tid, showEdit) {
         var minInput = document.getElementById('scalemin-' + tid);
         var maxInput = document.getElementById('scalemax-' + tid);
         var descInput = document.getElementById('scaledesc-' + tid);
+        var equivInput = document.getElementById('scaleequiv-' + tid);
         var passInput = document.getElementById('scalepass-' + tid);
 
         if (minInput && minInput.dataset.original !== undefined) {
@@ -743,6 +899,9 @@ function toggleEditScale(tid, showEdit) {
         }
         if (descInput && descInput.dataset.original !== undefined) {
             descInput.value = descInput.dataset.original;
+        }
+        if (equivInput && equivInput.dataset.original !== undefined) {
+            equivInput.value = equivInput.dataset.original;
         }
         if (passInput && passInput.dataset.original !== undefined) {
             passInput.checked = (passInput.dataset.original === '1');

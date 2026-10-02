@@ -10,6 +10,8 @@
  *  - Custom scale transmutation, gap detection, & overlap validation
  *  - Status override handling & exclusion from pass/fail rates
  *  - Group isolation (SEPARATEGROUPS / IDOR prevention)
+ *  - Computation rules (ungraded-as-zero, hidden items, midterm weight, rounding)
+ *  - Custom scale equivalents and per-section header overrides
  *  - Dynamic column whitelist injection resistance
  *  - Schema bounds & string truncation (OBS-03)
  *  - Roster computation service payload integrity
@@ -106,6 +108,7 @@ class MockDB {
             'local_gradesheet_itemmap'    => [],
             'local_gradesheet_transmute'  => [],
             'local_gradesheet_status'     => [],
+            'local_gradesheet_groupcfg'   => [],
             'course'                      => [],
             'groups'                      => [],
             'grade_items'                 => [],
@@ -687,6 +690,124 @@ $T->assert("Course number bounded within 50 chars", mb_strlen($truncated_code) <
 $long_catname = str_repeat("Category Name Exceeding Normal Length ", 4);
 $truncated_catname = mb_substr($long_catname, 0, 100);
 $T->assert("Category name bounded within 100 chars", mb_strlen($truncated_catname) <= 100);
+
+// =========================================================================
+echo "\n======================================================================\n";
+echo "BATTERY 9: Computation Rules, Scale Equivalents & Section Overrides\n";
+echo "======================================================================\n";
+// Course 401: Quizzes 40% / Exams 60%. Three midterm quizzes + one midterm exam,
+// one finals exam. Student 201 answered only ONE of the three quizzes.
+$courseid_rules = 601;
+$DB->insert_record('course', (object)['id' => $courseid_rules, 'fullname' => 'Rules Course', 'shortname' => 'RULES101']);
+$DB->insert_record('local_gradesheet_config', (object)[
+    'courseid' => $courseid_rules, 'semester' => 'First Semester', 'schoolyear' => '2026-2027',
+    'coursenumber' => 'RULES101', 'descriptive' => 'Rules Course', 'courseandyear' => 'BSCS 2A',
+    'schedule' => 'MW 8:00-9:30 AM', 'units' => '3', 'instructor' => 'COURSE INSTRUCTOR',
+    'department_head' => 'DH', 'registrar' => 'REG', 'college_dean' => 'DEAN',
+    'missingaszero' => 0, 'includehidden' => 1, 'midtermweight' => 50.0, 'roundaverage' => 0,
+]);
+$rc_quiz = $DB->insert_record('local_gradesheet_categories', (object)['courseid' => $courseid_rules, 'name' => 'Quizzes', 'weight' => 40.0, 'sortorder' => 0]);
+$rc_exam = $DB->insert_record('local_gradesheet_categories', (object)['courseid' => $courseid_rules, 'name' => 'Exams',   'weight' => 60.0, 'sortorder' => 1]);
+$rq1 = $DB->insert_record('grade_items', (object)['courseid' => $courseid_rules, 'itemtype' => 'mod', 'itemname' => 'Quiz 1', 'gradetype' => 1, 'grademax' => 10.0]);
+$rq2 = $DB->insert_record('grade_items', (object)['courseid' => $courseid_rules, 'itemtype' => 'mod', 'itemname' => 'Quiz 2', 'gradetype' => 1, 'grademax' => 10.0]);
+$rq3 = $DB->insert_record('grade_items', (object)['courseid' => $courseid_rules, 'itemtype' => 'mod', 'itemname' => 'Quiz 3', 'gradetype' => 1, 'grademax' => 10.0]);
+$rme = $DB->insert_record('grade_items', (object)['courseid' => $courseid_rules, 'itemtype' => 'mod', 'itemname' => 'Midterm Exam', 'gradetype' => 1, 'grademax' => 100.0, 'hidden' => 1]);
+$rfe = $DB->insert_record('grade_items', (object)['courseid' => $courseid_rules, 'itemtype' => 'mod', 'itemname' => 'Final Exam',   'gradetype' => 1, 'grademax' => 100.0]);
+foreach ([[$rq1,'midterm',$rc_quiz],[$rq2,'midterm',$rc_quiz],[$rq3,'midterm',$rc_quiz],[$rme,'midterm',$rc_exam],[$rfe,'finals',$rc_exam]] as [$gi,$per,$cat]) {
+    $DB->insert_record('local_gradesheet_itemmap', (object)['courseid' => $courseid_rules, 'gradeitemid' => $gi, 'period' => $per, 'categoryid' => $cat]);
+}
+// Student 201: Quiz 1 = 10/10, Quizzes 2 & 3 ungraded, Midterm Exam (hidden) = 80, Final Exam = 90.
+$DB->insert_record('grade_grades', (object)['itemid' => $rq1, 'userid' => 201, 'finalgrade' => 10.0]);
+$DB->insert_record('grade_grades', (object)['itemid' => $rme, 'userid' => 201, 'finalgrade' => 80.0]);
+$DB->insert_record('grade_grades', (object)['itemid' => $rfe, 'userid' => 201, 'finalgrade' => 90.0]);
+
+$set_rules = function(array $overrides) use ($DB, $courseid_rules) {
+    $cfg = $DB->get_record('local_gradesheet_config', ['courseid' => $courseid_rules]);
+    foreach ($overrides as $k => $v) { $cfg->$k = $v; }
+    $DB->update_record('local_gradesheet_config', $cfg);
+    helper::reset_caches();
+};
+
+// 9a. Default rules: ungraded skipped, hidden included for faculty.
+$set_rules([]);
+$r = helper::compute_student_grades($courseid_rules, 201);
+$T->assertEqual("Default: 3 of 5 mapped items graded (graded/mapped/missing exposed)", [$r['graded'], $r['mapped'], $r['missing']], [3, 5, 2]);
+// Midterm: Quizzes = 100 (only Quiz 1 counts), Exams = 80 -> 0.4*100 + 0.6*80 = 88
+$T->assertDelta("Default: midterm skips ungraded quizzes -> 88.0", $r['midterm'], 88.0);
+$T->assertDelta("Default: hidden midterm exam IS included for faculty", $r['midterm'], 88.0);
+$T->assertDelta("Default: finals = 90.0", $r['finals'], 90.0);
+$T->assertDelta("Default: final average 50/50 -> 89.0", $r['average'], 89.0);
+$T->assertEqual("Default: 89.0 transmutes to 1.6", $r['transmuted'], '1.6');
+
+// 9b. Student view never sees hidden items, regardless of includehidden.
+$rs = helper::compute_student_grades($courseid_rules, 201, true);
+// Midterm for the student: only Quizzes have visible data -> 100, re-normalized over 40% -> 100
+$T->assertDelta("Student view: hidden midterm exam excluded -> midterm 100.0", $rs['midterm'], 100.0);
+$T->assertEqual("Student view: mapped count drops to 4", $rs['mapped'], 4);
+
+// 9c. includehidden = 0 also hides the item from faculty computation.
+$set_rules(['includehidden' => 0]);
+$r = helper::compute_student_grades($courseid_rules, 201);
+$T->assertDelta("includehidden=0: faculty midterm also excludes hidden exam -> 100.0", $r['midterm'], 100.0);
+
+// 9d. missingaszero = 1 counts Quizzes 2 & 3 as 0.
+$set_rules(['includehidden' => 1, 'missingaszero' => 1]);
+$r = helper::compute_student_grades($courseid_rules, 201);
+// Quizzes = (100 + 0 + 0)/3 = 33.33; Exams = 80 -> 0.4*33.33 + 0.6*80 = 61.33
+$T->assertDelta("missingaszero: midterm penalizes missing quizzes -> 61.33", $r['midterm'], 61.3333, 0.01);
+$T->assertEqual("missingaszero: missing count still reported as 2", $r['missing'], 2);
+$T->assertDelta("missingaszero: final average (61.33+90)/2 = 75.67", $r['average'], 75.6667, 0.01);
+$T->assertEqual("missingaszero: 75.67 still PASSED", $r['remarks'], 'PASSED');
+
+// 9e. Midterm weight 33.33 / finals 66.67.
+$set_rules(['missingaszero' => 0, 'midtermweight' => 33.33]);
+$r = helper::compute_student_grades($courseid_rules, 201);
+// 0.3333*88 + 0.6667*90 = 89.33
+$T->assertDelta("midtermweight=33.33: average = 89.33", $r['average'], 89.3334, 0.01);
+
+// 9f. Rounding before transmutation: 89.33 -> 89 -> 1.6; 89.6 -> 90 -> 1.5.
+$set_rules(['midtermweight' => 50.0, 'roundaverage' => 1]);
+$DB->insert_record('grade_grades', (object)['itemid' => $rfe, 'userid' => 202, 'finalgrade' => 89.6]);
+$r = helper::compute_student_grades($courseid_rules, 202);
+$T->assertDelta("roundaverage: 89.6 finals-only average rounds to 90.0", $r['average'], 90.0);
+$T->assertEqual("roundaverage: 89.6 -> 90 -> transmutes to 1.5 (not 1.6)", $r['transmuted'], '1.5');
+$set_rules(['roundaverage' => 0]);
+$r = helper::compute_student_grades($courseid_rules, 202);
+$T->assertEqual("no rounding: 89.6 transmutes to 1.6", $r['transmuted'], '1.6');
+
+// 9g. Custom scale with explicit equivalents.
+$courseid_eq = 402;
+$DB->insert_record('local_gradesheet_transmute', (object)['courseid' => $courseid_eq, 'minscore' => 90, 'maxscore' => 100, 'equivalent' => '1.25', 'descriptor' => 'Excellent', 'sortorder' => 0, 'ispassing' => 1]);
+$DB->insert_record('local_gradesheet_transmute', (object)['courseid' => $courseid_eq, 'minscore' => 75, 'maxscore' => 89.99, 'equivalent' => '',     'descriptor' => 'Passed',    'sortorder' => 1, 'ispassing' => 1]);
+$DB->insert_record('local_gradesheet_transmute', (object)['courseid' => $courseid_eq, 'minscore' => 0,  'maxscore' => 74.99, 'equivalent' => '5.0',  'descriptor' => 'Failed',    'sortorder' => 2, 'ispassing' => 0]);
+helper::reset_caches();
+$T->assertEqual("Custom scale: bracket with equivalent returns '1.25'", helper::transmute_equiv(95.0, $courseid_eq), '1.25');
+$T->assertEqual("Custom scale: bracket without equivalent falls back to raw score", helper::transmute_equiv(80.0, $courseid_eq), '80.00');
+$T->assertEqual("Custom scale: failing bracket returns its equivalent '5.0'", helper::transmute_equiv(50.0, $courseid_eq), '5.0');
+$legend = helper::get_rating_legend($courseid_eq);
+$T->assertEqual("Custom scale legend carries the equivalent column", $legend[0][1], '1.25');
+
+// 9h. Per-section overrides win over the course-wide header values.
+$gid_a = $DB->insert_record('groups', (object)['courseid' => $courseid_rules, 'name' => 'BSCS 2A']);
+$gid_b = $DB->insert_record('groups', (object)['courseid' => $courseid_rules, 'name' => 'BSCS 2B']);
+helper::set_group_overrides($courseid_rules, $gid_b, ['courseandyear' => '', 'schedule' => 'TTH 1:00-2:30 PM', 'instructor' => 'section b teacher']);
+$MOCK_ENROLLED_USERS[$courseid_rules] = [201 => true, 202 => true];
+$DB->insert_record('user', (object)['id' => 201, 'idnumber' => '2026-0201', 'firstname' => 'Ana', 'lastname' => 'Reyes']);
+$DB->insert_record('user', (object)['id' => 202, 'idnumber' => '2026-0202', 'firstname' => 'Ben', 'lastname' => 'Cruz']);
+$MOCK_GROUP_MEMBERS[] = "{$gid_a}:201";
+$MOCK_GROUP_MEMBERS[] = "{$gid_b}:202";
+helper::reset_caches();
+$exp_a = gradesheet_service::compute_all_grades($courseid_rules, $gid_a);
+$exp_b = gradesheet_service::compute_all_grades($courseid_rules, $gid_b);
+$T->assertEqual("Section A (no override): label is the group name", $exp_a['courseandyear'], 'BSCS 2A');
+$T->assertEqual("Section A (no override): schedule is the course-wide value", $exp_a['schedule'], 'MW 8:00-9:30 AM');
+$T->assertEqual("Section B: schedule override applied", $exp_b['schedule'], 'TTH 1:00-2:30 PM');
+$T->assertEqual("Section B: instructor override applied and upper-cased", $exp_b['instructor'], 'SECTION B TEACHER');
+$T->assertEqual("Section B: blank label override falls back to group name", $exp_b['courseandyear'], 'BSCS 2B');
+$T->assertEqual("Section A roster contains only its member", count($exp_a['rows']), 1);
+$T->assertEqual("Section B roster contains only its member", count($exp_b['rows']), 1);
+helper::set_group_overrides($courseid_rules, $gid_b, ['courseandyear' => '', 'schedule' => '', 'instructor' => '']);
+$T->assert("Clearing all override fields deletes the row", !$DB->record_exists('local_gradesheet_groupcfg', ['courseid' => $courseid_rules, 'groupid' => $gid_b]));
 
 // =========================================================================
 echo "\n======================================================================\n";
