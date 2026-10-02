@@ -14,6 +14,7 @@
  *  - Custom scale equivalents and per-section header overrides
  *  - Formula-based transmutation (safe expression evaluator, clamp, passmark, legend)
  *  - Signatory auto-detection from roles (instructor, dept head, registrar, dean)
+ *  - Settings health check ("Needs attention" panel)
  *  - Dynamic column whitelist injection resistance
  *  - Schema bounds & string truncation (OBS-03)
  *  - Roster computation service payload integrity
@@ -225,6 +226,16 @@ class MockDB {
                 if (strpos($select, 'gradetype = 1') !== false && ($row->gradetype ?? 1) != 1) {
                     $match = false;
                 }
+                if (strpos($select, 'hidden <> 0') !== false && empty($row->hidden)) {
+                    $match = false;
+                }
+            } else if ($table === 'local_gradesheet_groupcfg') {
+                if ($params && isset($params[0]) && $row->courseid != $params[0]) {
+                    $match = false;
+                }
+                if (strpos($select, "schedule <> ''") !== false && trim((string)($row->schedule ?? '')) === '') {
+                    $match = false;
+                }
             } else if ($table === 'local_gradesheet_itemmap') {
                 if ($params && isset($params[0]) && $row->courseid != $params[0]) {
                     $match = false;
@@ -265,6 +276,10 @@ class MockDB {
         }
         $placeholders = implode(',', array_fill(0, count($items), '?'));
         return ["IN ($placeholders)", array_values($items)];
+    }
+
+    public function count_records_select(string $table, string $select = '', ?array $params = null): int {
+        return count($this->get_records_select($table, $select, $params));
     }
 
     public function count_records(string $table, ?array $conditions = null): int {
@@ -342,6 +357,10 @@ function groups_get_course_groupmode($course): int {
 function groups_get_course_group($course) {
     global $MOCK_ACTIVE_GROUP;
     return $MOCK_ACTIVE_GROUP ?? 0;
+}
+function groups_get_all_groups($courseid, $userid = 0, $groupingid = 0, $fields = 'g.*'): array {
+    global $DB;
+    return $DB->get_records('groups', ['courseid' => $courseid]);
 }
 function groups_is_member(int $groupid, int $userid): bool {
     global $MOCK_GROUP_MEMBERS;
@@ -1009,6 +1028,81 @@ $DB->delete_records('role', ['id' => $r_reg]);
 $det = helper::detect_signatories($courseid_sig);
 $T->assertEqual("Detect: missing role -> blank name", $det['registrar']['name'], '');
 $T->assert("Detect: missing role -> explanatory source", strpos($det['registrar']['source'], 'does not exist') !== false);
+
+// =========================================================================
+echo "\n======================================================================\n";
+echo "BATTERY 12: Settings Health Check (Needs Attention panel)\n";
+echo "======================================================================\n";
+$USER = (object)['id' => 999];
+// 12a. A deliberately broken course: weights 90%, one unmapped item, a hidden item, no finals items,
+//      blank schedule, bad school year, no signatories, built-in table.
+$courseid_h = 901;
+$DB->insert_record('course', (object)['id' => $courseid_h, 'fullname' => 'Health Course', 'shortname' => 'HLTH101']);
+$DB->insert_record('local_gradesheet_config', (object)[
+    'courseid' => $courseid_h, 'semester' => 'First Semester', 'schoolyear' => '2026/2027',
+    'coursenumber' => 'HLTH101', 'descriptive' => '', 'courseandyear' => '', 'schedule' => 'TBA', 'units' => 'three',
+    'instructor' => '', 'department_head' => '', 'registrar' => '', 'college_dean' => '',
+    'missingaszero' => 0, 'includehidden' => 0, 'midtermweight' => 50, 'roundaverage' => 0, 'transmutemode' => 'essu',
+]);
+$hc_q = $DB->insert_record('local_gradesheet_categories', (object)['courseid' => $courseid_h, 'name' => 'Quizzes', 'weight' => 40.0, 'sortorder' => 0]);
+$hc_e = $DB->insert_record('local_gradesheet_categories', (object)['courseid' => $courseid_h, 'name' => 'Exams',   'weight' => 50.0, 'sortorder' => 1]);
+$hc_p = $DB->insert_record('local_gradesheet_categories', (object)['courseid' => $courseid_h, 'name' => 'Project', 'weight' => 0.0,  'sortorder' => 2]);
+$hi1 = $DB->insert_record('grade_items', (object)['courseid' => $courseid_h, 'itemtype' => 'mod', 'itemname' => 'Quiz 1', 'gradetype' => 1]);
+$hi2 = $DB->insert_record('grade_items', (object)['courseid' => $courseid_h, 'itemtype' => 'mod', 'itemname' => 'Quiz 2', 'gradetype' => 1, 'hidden' => 1]);
+$hi3 = $DB->insert_record('grade_items', (object)['courseid' => $courseid_h, 'itemtype' => 'mod', 'itemname' => 'Project', 'gradetype' => 1]);
+$DB->insert_record('local_gradesheet_itemmap', (object)['courseid' => $courseid_h, 'gradeitemid' => $hi1, 'period' => 'midterm', 'categoryid' => $hc_q]);
+$DB->insert_record('local_gradesheet_itemmap', (object)['courseid' => $courseid_h, 'gradeitemid' => $hi3, 'period' => 'midterm', 'categoryid' => $hc_p]);
+// $hi2 left unmapped on purpose.
+helper::reset_caches();
+$issues = helper::settings_health($courseid_h);
+$texts  = array_map(function ($i) { return $i['level'] . '|' . $i['text']; }, $issues);
+$has = function (string $level, string $needle) use ($texts): bool {
+    foreach ($texts as $t) { if (strpos($t, $level . '|') === 0 && stripos($t, $needle) !== false) { return true; } }
+    return false;
+};
+$T->assert("Health: weights not 100% is a blocking (danger) issue",          $has('danger', 'total 90%'));
+$T->assert("Health: unmapped item reported",                                  $has('warning', '1 of 3 grade item(s) are not mapped'));
+$T->assert("Health: empty Finals period reported",                            $has('warning', 'mapped to Finals'));
+$T->assert("Health: category with weight but no items reported",              $has('warning', 'Category "Exams" (50%) has no grade items'));
+$T->assert("Health: category with items but 0% weight reported",              $has('warning', 'Category "Project" has 1 item(s) but a weight of 0%'));
+$T->assert("Health: hidden item excluded is a warning when includehidden=0",  $has('warning', 'EXCLUDED from'));
+$T->assert("Health: ungraded-as-zero off is an info note",                    $has('info', 'Ungraded items are skipped'));
+$T->assert("Health: built-in table is an info note suggesting a formula",     $has('info', 'built-in ESSU table'));
+$T->assert("Health: blank Descriptive Title reported",                        $has('warning', 'Descriptive Title is blank'));
+$T->assert("Health: TBA schedule reported",                                   $has('warning', 'Schedule of Classes is not set'));
+$T->assert("Health: non-numeric units reported",                              $has('warning', 'Number of Units'));
+$T->assert("Health: malformed school year reported",                          $has('warning', '2026/2027'));
+$T->assert("Health: blank Course and Year with no groups reported",           $has('warning', 'Course and Year is blank'));
+$T->assert("Health: every missing signatory reported",
+    $has('warning', 'Instructor line will print blank') && $has('warning', 'Department Head line') && $has('warning', 'Registrar line') && $has('warning', 'College Dean line'));
+$T->assertEqual("Health: ordered most serious first", $issues[0]['level'], 'danger');
+$T->assert("Health: every issue carries an anchor", count(array_filter($issues, function ($i) { return $i['anchor'] === ''; })) === 0);
+
+// 12b. Fix everything and the list empties (apart from nothing).
+$cfg_h = $DB->get_record('local_gradesheet_config', ['courseid' => $courseid_h]);
+$cfg_h->schoolyear = date('Y') . '-' . (date('Y') + 1); $cfg_h->descriptive = 'Health'; $cfg_h->courseandyear = 'BSCS 4A';
+$cfg_h->schedule = 'MW 8:00-9:30 AM'; $cfg_h->units = '3'; $cfg_h->includehidden = 1; $cfg_h->missingaszero = 1;
+$cfg_h->transmutemode = 'formula'; $cfg_h->formula = '1 + (100 - P) * 0.08'; $cfg_h->formulamin = 1; $cfg_h->formulamax = 5; $cfg_h->formuladecimals = 1; $cfg_h->passmark = 75;
+$cfg_h->instructor = 'A'; $cfg_h->department_head = 'B'; $cfg_h->registrar = 'C'; $cfg_h->college_dean = 'D';
+$DB->update_record('local_gradesheet_config', $cfg_h);
+$cat_e = $DB->get_record('local_gradesheet_categories', ['id' => $hc_e]); $cat_e->weight = 30.0; $DB->update_record('local_gradesheet_categories', $cat_e);
+$cat_p = $DB->get_record('local_gradesheet_categories', ['id' => $hc_p]); $cat_p->weight = 30.0; $DB->update_record('local_gradesheet_categories', $cat_p);
+$DB->insert_record('local_gradesheet_itemmap', (object)['courseid' => $courseid_h, 'gradeitemid' => $hi2, 'period' => 'finals', 'categoryid' => $hc_q]);
+$hi4 = $DB->insert_record('grade_items', (object)['courseid' => $courseid_h, 'itemtype' => 'mod', 'itemname' => 'Exam', 'gradetype' => 1]);
+$DB->insert_record('local_gradesheet_itemmap', (object)['courseid' => $courseid_h, 'gradeitemid' => $hi4, 'period' => 'finals', 'categoryid' => $hc_e]);
+helper::reset_caches();
+$issues = helper::settings_health($courseid_h);
+$nonInfo = array_filter($issues, function ($i) { return $i['level'] !== 'info'; });
+$T->assertEqual("Health: after fixing, no blocking or warning issues remain", count($nonInfo), 0,);
+$T->assertEqual("Health: only the 'hidden item included' note remains", count($issues), 1);
+
+// 12c. A formula that collapses to one value is caught.
+$cfg_h->formula = '95'; $cfg_h->formulamin = null; $cfg_h->formulamax = null;
+$DB->update_record('local_gradesheet_config', $cfg_h);
+helper::reset_caches();
+$issues = helper::settings_health($courseid_h);
+$texts  = array_map(function ($i) { return $i['level'] . '|' . $i['text']; }, $issues);
+$T->assert("Health: constant formula flagged", count(array_filter($texts, function ($t) { return strpos($t, 'warning|') === 0 && strpos($t, 'same grade') !== false; })) === 1);
 
 // =========================================================================
 echo "\n======================================================================\n";

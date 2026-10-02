@@ -1166,6 +1166,160 @@ class helper {
     }
 
     /**
+     * Configuration health check for a course, used by the "Needs attention"
+     * panel on the settings page and the dashboard reminder.
+     *
+     * @return array<int, array{level:string, text:string, anchor:string}>
+     *         level is 'danger' (blocks printing), 'warning' (sheet will be
+     *         wrong or incomplete) or 'info' (worth knowing).
+     */
+    public static function settings_health(int $courseid, int $groupid = 0): array {
+        global $DB;
+        $issues = [];
+        $add = function (string $level, string $text, string $anchor) use (&$issues): void {
+            $issues[] = ['level' => $level, 'text' => $text, 'anchor' => $anchor];
+        };
+        $fmt = function ($v): string {
+            return rtrim(rtrim(number_format((float)$v, 2, '.', ''), '0'), '.');
+        };
+
+        $config = $DB->get_record('local_gradesheet_config', ['courseid' => $courseid]);
+        $groups = groups_get_all_groups($courseid);
+
+        // 1. Category weights (hard gate).
+        $w = self::validate_weight_sum($courseid);
+        if ($w['count'] === 0) {
+            $add('danger', 'No grade categories are defined. Printing and exporting are blocked.', 'grade-categories');
+        } else if (!$w['valid']) {
+            $add('danger', 'Category weights total ' . $fmt($w['total']) . '%, not 100%. Printing and exporting are blocked.', 'grade-categories');
+        }
+
+        // 2. Grade items and mapping.
+        $gitems = $DB->get_records_select('grade_items',
+            'courseid = ? AND itemtype != ? AND itemname IS NOT NULL AND gradetype = 1', [$courseid, 'course']);
+        if (empty($gitems)) {
+            $add('info', 'This course has no numeric grade items yet, so every student will show "-".', 'grade-mapping');
+        } else {
+            $mw = self::get_mapping_warnings($courseid);
+            if ($mw) {
+                if ($mw['unmapped'] > 0) {
+                    $add('warning', $mw['unmapped'] . ' of ' . count($gitems) . ' grade item(s) are not mapped to a category and are excluded from computation.', 'grade-mapping');
+                }
+                if ($mw['midterm'] === 0) {
+                    $add('warning', 'No grade items are mapped to Midterm; that column will print "-".', 'grade-mapping');
+                }
+                if ($mw['finals'] === 0) {
+                    $add('warning', 'No grade items are mapped to Finals; that column will print "-".', 'grade-mapping');
+                }
+            }
+            $cats = $DB->get_records('local_gradesheet_categories', ['courseid' => $courseid]);
+            $maps = $DB->get_records('local_gradesheet_itemmap', ['courseid' => $courseid]);
+            $percat = [];
+            foreach ($maps as $m) {
+                if (isset($gitems[$m->gradeitemid]) && $m->categoryid) {
+                    $percat[$m->categoryid] = ($percat[$m->categoryid] ?? 0) + 1;
+                }
+            }
+            foreach ($cats as $cat) {
+                $n = $percat[$cat->id] ?? 0;
+                if ($n === 0 && (float)$cat->weight > 0) {
+                    $add('warning', 'Category "' . s($cat->name) . '" (' . $fmt($cat->weight) . '%) has no grade items mapped to it; its weight is redistributed to the other categories.', 'grade-mapping');
+                } else if ($n > 0 && (float)$cat->weight == 0) {
+                    $add('warning', 'Category "' . s($cat->name) . '" has ' . $n . ' item(s) but a weight of 0%, so they do not count.', 'grade-categories');
+                }
+            }
+            $hidden = $DB->count_records_select('grade_items',
+                'courseid = ? AND itemtype != ? AND itemname IS NOT NULL AND gradetype = 1 AND hidden <> 0', [$courseid, 'course']);
+            $rules = self::get_computation_rules($courseid);
+            if ($hidden > 0) {
+                $add($rules['includehidden'] ? 'info' : 'warning',
+                    $hidden . ' grade item(s) are hidden from students and are ' . ($rules['includehidden'] ? 'included in' : 'EXCLUDED from') . ' the faculty computation.', 'computation-rules');
+            }
+            if (!$rules['missingaszero']) {
+                $add('info', 'Ungraded items are skipped (not counted as 0%). Turn on "Count ungraded items as 0%" before finalizing the official sheet.', 'computation-rules');
+            }
+        }
+
+        // 3. Transmutation.
+        $fs = self::get_formula_settings($courseid);
+        if ($fs['mode'] !== 'formula') {
+            $add('info', 'Transmutation uses the built-in ESSU table. Set an explicit formula under Transmutation Formula so the computation is stated, not implied.', 'transmutation-formula');
+        } else {
+            $g0 = self::apply_formula(0.0, $fs);
+            $g100 = self::apply_formula(100.0, $fs);
+            if ($g0 === null || $g100 === null) {
+                $add('danger', 'The transmutation formula cannot be evaluated; grades will print "-".', 'transmutation-formula');
+            } else if ($g0 == $g100) {
+                $add('warning', 'The transmutation formula gives the same grade (' . $fmt($g0) . ') for 0% and 100%.', 'transmutation-formula');
+            }
+        }
+        foreach (self::validate_custom_scale($courseid) as $sw) {
+            $add('warning', strip_tags($sw), 'grading-scale');
+        }
+        $custom = self::get_custom_transmute_rows($courseid);
+        foreach ($custom as $row) {
+            if (trim((string)$row->descriptor) === '' && trim((string)$row->equivalent) === '') {
+                $add('warning', 'Bracket ' . $fmt($row->minscore) . '-' . $fmt($row->maxscore) . ' has no descriptor or equivalent and prints blank in the legend.', 'grading-scale');
+            }
+        }
+
+        // 4. Report header.
+        if (!$config) {
+            $add('warning', 'Course details have not been saved yet.', 'course-details');
+        } else {
+            if (trim((string)$config->coursenumber) === '') {
+                $add('warning', 'Subject and Course No. is blank.', 'course-details');
+            }
+            if (trim((string)$config->descriptive) === '') {
+                $add('warning', 'Descriptive Title is blank.', 'course-details');
+            }
+            if (trim((string)$config->courseandyear) === '' && empty($groups)) {
+                $add('warning', 'Course and Year is blank and the course has no groups, so the section line will be empty.', 'course-details');
+            }
+            $sched = strtoupper(trim((string)$config->schedule));
+            if ($sched === '' || $sched === 'TBA') {
+                $add('warning', 'Schedule of Classes is not set.', 'course-details');
+            }
+            if (trim((string)$config->units) === '' || !is_numeric($config->units)) {
+                $add('warning', 'Number of Units is blank or not a number.', 'course-details');
+            }
+            if (preg_match('/^(\d{4})-(\d{4})$/', (string)$config->schoolyear, $m)) {
+                $y = (int)date('Y');
+                if ((int)$m[1] < $y - 1 || (int)$m[1] > $y + 1) {
+                    $add('info', 'School Year is ' . s($config->schoolyear) . '; check that it is current.', 'course-details');
+                }
+            } else {
+                $add('warning', 'School Year "' . s((string)$config->schoolyear) . '" is not in the form 2026-2027.', 'course-details');
+            }
+        }
+
+        // 5. Signatories.
+        $cfg = self::load_course_config($courseid);
+        $sig = self::resolve_signatories($cfg, $courseid, $groupid);
+        $labels = ['instructor' => 'Instructor', 'department_head' => 'Department Head', 'registrar' => 'Registrar', 'college_dean' => 'College Dean'];
+        foreach ($labels as $k => $label) {
+            if ($sig[$k]['name'] === '') {
+                $add('warning', $label . ' line will print blank: ' . s($sig[$k]['source']) . '. Assign the role or type a name.', 'sig-' . $k);
+            }
+        }
+
+        // 6. Sections.
+        if (count($groups) > 1) {
+            $withsched = $DB->count_records_select('local_gradesheet_groupcfg', "courseid = ? AND schedule <> ''", [$courseid]);
+            if ($withsched < count($groups)) {
+                $add('info', count($groups) . ' sections (groups) share the course-wide schedule; set per-section schedules if they differ.', 'section-overrides');
+            }
+        }
+
+        // Most serious first.
+        $rank = ['danger' => 0, 'warning' => 1, 'info' => 2];
+        usort($issues, function ($a, $b) use ($rank) {
+            return $rank[$a['level']] <=> $rank[$b['level']];
+        });
+        return $issues;
+    }
+
+    /**
      * Renders a consistent alert banner across the gradesheet UI.
      */
     public static function render_alert(string $message, string $type = 'info', string $icon = '', string $action_html = ''): string {

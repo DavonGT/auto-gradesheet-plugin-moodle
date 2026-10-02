@@ -322,6 +322,22 @@ if ($courseid) {
         echo helper::render_alert('Signatories &mdash; ' . implode(' &middot; ', $sigparts), $sigmissing ? 'warning' : 'secondary', $sigmissing ? '&#9888;' : '&#9998;',
             $canmanage ? '<a href="course_settings.php?courseid=' . $courseid . '" class="btn btn-light btn-sm">Edit</a>' : '');
 
+        // One-line reminder when Settings has problems that would affect the printed sheet.
+        if ($canmanage) {
+            $health = helper::settings_health($courseid, $groupid);
+            $nblock = count(array_filter($health, function ($h) { return $h['level'] === 'danger'; }));
+            $nwarn  = count(array_filter($health, function ($h) { return $h['level'] === 'warning'; }));
+            if ($nblock + $nwarn > 0) {
+                $msg = '<strong>Settings need attention:</strong> '
+                    . ($nblock ? $nblock . ' blocking issue(s)' : '')
+                    . ($nblock && $nwarn ? ' and ' : '')
+                    . ($nwarn ? $nwarn . ' warning(s)' : '')
+                    . ' would affect the printed sheet.';
+                echo helper::render_alert($msg, $nblock ? 'danger' : 'warning', '&#9888;',
+                    '<a href="course_settings.php?courseid=' . $courseid . '#needs-attention" class="btn btn-light btn-sm">Review</a>');
+            }
+        }
+
         if ($canmanage) {
             $groupparam = ($groupid > 0) ? '&group=' . $groupid : '';
             $btncls = $weightvalid['valid'] ? '' : ' disabled';

@@ -24,16 +24,78 @@ $gitems = $DB->get_records_select(
 );
 
 // ── HANDLE FORM SUBMISSIONS ───────────────────────────────────────────────────
+// Every field is validated here before anything touches the database. Bad
+// input never produces a Moodle exception page: the user is sent back to the
+// card they were on with a message that names the field and the rule.
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     require_sesskey();
-    $action = optional_param('action', '', PARAM_TEXT);
+    $action = optional_param('action', '', PARAM_ALPHA);
 
-    $settingsurl = new moodle_url('/local/gradesheet/course_settings.php', ['courseid' => $courseid]);
-    $catsurl     = new moodle_url('/local/gradesheet/course_settings.php', ['courseid' => $courseid], 'grade-categories');
-    $mapurl      = new moodle_url('/local/gradesheet/course_settings.php', ['courseid' => $courseid], 'grade-mapping');
-    $scaleurl    = new moodle_url('/local/gradesheet/course_settings.php', ['courseid' => $courseid], 'grading-scale');
+    $urlfor = function (string $anchor = ''): moodle_url {
+        return new moodle_url('/local/gradesheet/course_settings.php', ['courseid' => $courseid], $anchor ?: null);
+    };
+    $settingsurl = $urlfor();
+    $catsurl     = $urlfor('grade-categories');
+    $mapurl      = $urlfor('grade-mapping');
+    $scaleurl    = $urlfor('grading-scale');
+    $rulesurl    = $urlfor('computation-rules');
+    $formulaurl  = $urlfor('transmutation-formula');
+    $groupsurl   = $urlfor('section-overrides');
 
-    $duplicate_category_name = function(string $name, int $excludeid = 0) use ($DB, $courseid): bool {
+    $fail = function (moodle_url $back, string $message): void {
+        redirect($back, $message, null, \core\output\notification::NOTIFY_ERROR);
+    };
+    $ok = function (moodle_url $back, string $message, array $warnings = []): void {
+        if (!empty($warnings)) {
+            redirect($back, $message . ' Note: ' . implode(' ', $warnings), null, \core\output\notification::NOTIFY_WARNING);
+        }
+        redirect($back, $message, null, \core\output\notification::NOTIFY_SUCCESS);
+    };
+
+    // Reads a text field; enforces required/length instead of silently truncating.
+    $read_text = function (string $param, string $label, int $maxlen, bool $required, moodle_url $back) use ($fail): string {
+        $v = trim((string)optional_param($param, '', PARAM_TEXT));
+        if ($required && $v === '') {
+            $fail($back, $label . ' is required.');
+        }
+        if (mb_strlen($v) > $maxlen) {
+            $fail($back, $label . ' must be ' . $maxlen . ' characters or fewer (you entered ' . mb_strlen($v) . ').');
+        }
+        return $v;
+    };
+
+    // Reads a numeric field without PARAM_FLOAT's silent "abc -> 0" behaviour.
+    // Accepts "85", "85.5", "85%", " 1,000 ". Returns null when blank and not required.
+    $read_number = function (string $param, string $label, ?float $min, ?float $max, bool $required, moodle_url $back, ?float $default = null) use ($fail): ?float {
+        $raw = trim((string)optional_param($param, '', PARAM_RAW_TRIMMED));
+        if ($raw === '') {
+            if ($required) {
+                $fail($back, $label . ' is required.');
+            }
+            return $default;
+        }
+        $clean = str_replace([',', '%', ' '], '', $raw);
+        if (!is_numeric($clean)) {
+            $fail($back, $label . ' must be a number (you entered "' . s($raw) . '").');
+        }
+        $v = (float)$clean;
+        if (!is_finite($v)) {
+            $fail($back, $label . ' is not a valid number.');
+        }
+        if ($min !== null && $v < $min) {
+            $fail($back, $label . ' cannot be less than ' . $min . ' (you entered ' . s($raw) . ').');
+        }
+        if ($max !== null && $v > $max) {
+            $fail($back, $label . ' cannot be more than ' . $max . ' (you entered ' . s($raw) . ').');
+        }
+        return $v;
+    };
+
+    $fmt = function (float $v): string {
+        return rtrim(rtrim(number_format($v, 2, '.', ''), '0'), '.');
+    };
+
+    $duplicate_category_name = function (string $name, int $excludeid = 0) use ($DB, $courseid): bool {
         $records = $DB->get_records('local_gradesheet_categories', ['courseid' => $courseid]);
         $needle  = mb_strtolower(trim($name));
         foreach ($records as $rec) {
@@ -44,280 +106,376 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         return false;
     };
 
-    // Save course details
-    if ($action === 'savedetails') {
-        $existing = $DB->get_record('local_gradesheet_config', ['courseid' => $courseid]);
-        $details  = [
-            'semester'        => mb_substr(required_param('semester',        PARAM_TEXT), 0, 50),
-            'schoolyear'      => mb_substr(required_param('schoolyear',      PARAM_TEXT), 0, 20),
-            'coursenumber'    => mb_substr(required_param('coursenumber',     PARAM_TEXT), 0, 50),
-            'descriptive'     => mb_substr(required_param('descriptive',      PARAM_TEXT), 0, 100),
-            'courseandyear'   => mb_substr(required_param('courseandyear',    PARAM_TEXT), 0, 50),
-            'schedule'        => mb_substr(required_param('schedule',         PARAM_TEXT), 0, 50),
-            'units'           => mb_substr(required_param('units',            PARAM_TEXT), 0, 10),
-            'instructor'      => mb_substr(required_param('instructor',       PARAM_TEXT), 0, 100),
-            'department_head' => mb_substr(required_param('department_head',  PARAM_TEXT), 0, 100),
-            'registrar'       => mb_substr(required_param('registrar',        PARAM_TEXT), 0, 100),
-            'college_dean'    => mb_substr(required_param('college_dean',     PARAM_TEXT), 0, 100),
-        ];
-        if ($existing) {
-            foreach ($details as $k => $v) $existing->$k = $v;
-            $existing->timemodified = time();
-            $DB->update_record('local_gradesheet_config', $existing);
-        } else {
-            $record = (object) array_merge([
-                'courseid' => $courseid,
-                'timecreated' => time(), 'timemodified' => time(),
-            ], $details);
-            $DB->insert_record('local_gradesheet_config', $record);
+    // Weight-total note appended to category messages so faculty see the effect immediately.
+    $weight_note = function () use ($courseid, $fmt): array {
+        $w = helper::validate_weight_sum($courseid);
+        if ($w['valid']) {
+            return [];
         }
-        redirect($settingsurl, 'Course details saved!', null,
-            \core\output\notification::NOTIFY_SUCCESS);
-    }
+        return ['Category weights now total ' . $fmt((float)$w['total']) . '%; they must total exactly 100% before printing or exporting.'];
+    };
 
-    // Save computation rules
-    if ($action === 'saverules') {
-        helper::ensure_course_defaults($courseid);
-        $existing = $DB->get_record('local_gradesheet_config', ['courseid' => $courseid], '*', MUST_EXIST);
-        $mw = optional_param('midtermweight', 50, PARAM_FLOAT);
-        if ($mw < 0 || $mw > 100) {
-            redirect(new moodle_url('/local/gradesheet/course_settings.php', ['courseid' => $courseid], 'computation-rules'),
-                'Midterm weight must be between 0 and 100.', null, \core\output\notification::NOTIFY_ERROR);
-        }
-        $existing->missingaszero = optional_param('missingaszero', 0, PARAM_INT) ? 1 : 0;
-        $existing->includehidden = optional_param('includehidden', 0, PARAM_INT) ? 1 : 0;
-        $existing->midtermweight = round($mw, 2);
-        $existing->roundaverage  = optional_param('roundaverage', 0, PARAM_INT) ? 1 : 0;
-        $existing->timemodified  = time();
-        $DB->update_record('local_gradesheet_config', $existing);
-        helper::reset_caches();
-        redirect(new moodle_url('/local/gradesheet/course_settings.php', ['courseid' => $courseid], 'computation-rules'),
-            'Computation rules saved!', null, \core\output\notification::NOTIFY_SUCCESS);
-    }
+    try {
+        switch ($action) {
 
-    // Save transmutation formula
-    if ($action === 'saveformula') {
-        $formulaurl = new moodle_url('/local/gradesheet/course_settings.php', ['courseid' => $courseid], 'transmutation-formula');
-        helper::ensure_course_defaults($courseid);
-        $existing = $DB->get_record('local_gradesheet_config', ['courseid' => $courseid], '*', MUST_EXIST);
+            // ── Course details & signatories ─────────────────────────────────
+            case 'savedetails':
+                $semester = $read_text('semester', 'Semester', 50, true, $settingsurl);
+                if (!in_array($semester, ['First Semester', 'Second Semester', 'Summer'], true)) {
+                    $fail($settingsurl, 'Semester must be First Semester, Second Semester or Summer.');
+                }
 
-        $mode     = optional_param('transmutemode', 'essu', PARAM_ALPHA) === 'formula' ? 'formula' : 'essu';
-        $formulat = trim(optional_param('formula', '', PARAM_RAW_TRIMMED));
-        $fmin     = trim(optional_param('formulamin', '', PARAM_RAW_TRIMMED));
-        $fmax     = trim(optional_param('formulamax', '', PARAM_RAW_TRIMMED));
-        $decimals = optional_param('formuladecimals', 1, PARAM_INT);
-        $passmark = optional_param('passmark', 75, PARAM_FLOAT);
+                $schoolyear = $read_text('schoolyear', 'School Year', 20, true, $settingsurl);
+                if (!preg_match('/^(\d{4})\s*-\s*(\d{4})$/', $schoolyear, $m)) {
+                    $fail($settingsurl, 'School Year must look like 2026-2027 (you entered "' . s($schoolyear) . '").');
+                }
+                if ((int)$m[2] !== (int)$m[1] + 1) {
+                    $fail($settingsurl, 'School Year must be two consecutive years, e.g. 2026-2027 (you entered "' . s($schoolyear) . '").');
+                }
+                $schoolyear = $m[1] . '-' . $m[2];
 
-        if ($mode === 'formula') {
-            $err = \local_gradesheet\formula::validate($formulat);
-            if ($err !== '') {
-                redirect($formulaurl, 'Formula not saved: ' . $err, null, \core\output\notification::NOTIFY_ERROR);
-            }
-        }
-        if (($fmin !== '' && !is_numeric($fmin)) || ($fmax !== '' && !is_numeric($fmax))) {
-            redirect($formulaurl, 'Minimum and maximum grade must be numbers (or left blank).', null, \core\output\notification::NOTIFY_ERROR);
-        }
-        if ($fmin !== '' && $fmax !== '' && floatval($fmin) > floatval($fmax)) {
-            redirect($formulaurl, 'Minimum grade cannot be greater than the maximum grade.', null, \core\output\notification::NOTIFY_ERROR);
-        }
-        if ($passmark < 0 || $passmark > 100) {
-            redirect($formulaurl, 'Passing mark must be between 0 and 100.', null, \core\output\notification::NOTIFY_ERROR);
-        }
+                $coursenumber  = $read_text('coursenumber',  'Subject and Course No.', 50,  true,  $settingsurl);
+                $descriptive   = $read_text('descriptive',   'Descriptive Title',      100, true,  $settingsurl);
+                $courseandyear = $read_text('courseandyear', 'Course and Year',        50,  false, $settingsurl);
+                $schedule      = $read_text('schedule',      'Schedule of Classes',    50,  false, $settingsurl);
+                $units         = $read_number('units', 'Number of Units', 0, 12, true, $settingsurl);
 
-        $existing->transmutemode   = $mode;
-        $existing->formula         = mb_substr($formulat, 0, 255);
-        $existing->formulamin      = ($fmin === '') ? null : round(floatval($fmin), 2);
-        $existing->formulamax      = ($fmax === '') ? null : round(floatval($fmax), 2);
-        $existing->formuladecimals = max(0, min(2, $decimals));
-        $existing->passmark        = round($passmark, 2);
-        $existing->timemodified    = time();
-        $DB->update_record('local_gradesheet_config', $existing);
-        helper::reset_caches();
-        redirect($formulaurl, 'Transmutation settings saved!', null, \core\output\notification::NOTIFY_SUCCESS);
-    }
+                $sigs = [];
+                foreach (['instructor' => 'Instructor', 'department_head' => 'Department Head',
+                          'registrar' => 'Registrar', 'college_dean' => 'College Dean'] as $f => $label) {
+                    $v = $read_text($f, $label, 100, false, $settingsurl);
+                    // Placeholders from older versions mean "not set": store blank so auto-detect applies.
+                    $sigs[$f] = helper::signatory_is_blank($v) ? '' : $v;
+                }
 
-    // Save per-section (group) header overrides
-    if ($action === 'savegroupcfg') {
-        $gid = required_param('groupid', PARAM_INT);
-        helper::set_group_overrides($courseid, $gid, [
-            'courseandyear' => optional_param('g_courseandyear', '', PARAM_TEXT),
-            'schedule'      => optional_param('g_schedule', '', PARAM_TEXT),
-            'instructor'    => optional_param('g_instructor', '', PARAM_TEXT),
-        ]);
-        redirect(new moodle_url('/local/gradesheet/course_settings.php', ['courseid' => $courseid], 'section-overrides'),
-            'Section overrides saved!', null, \core\output\notification::NOTIFY_SUCCESS);
-    }
+                $details = array_merge([
+                    'semester'      => $semester,
+                    'schoolyear'    => $schoolyear,
+                    'coursenumber'  => $coursenumber,
+                    'descriptive'   => $descriptive,
+                    'courseandyear' => $courseandyear,
+                    'schedule'      => $schedule,
+                    'units'         => $fmt($units),
+                ], $sigs);
 
-    // Add a new category
-    if ($action === 'addcategory') {
-        $name   = mb_substr(required_param('catname',   PARAM_TEXT), 0, 100);
-        $weight = required_param('catweight', PARAM_FLOAT);
-        if (empty($name) || $weight < 0) {
-            redirect($catsurl, 'Category name is required and the weight cannot be negative.', null,
-                \core\output\notification::NOTIFY_ERROR);
-        }
-        if ($duplicate_category_name($name)) {
-            redirect($catsurl, 'A category named "' . s(trim($name)) . '" already exists.', null,
-                \core\output\notification::NOTIFY_WARNING);
-        }
-        $sortorder = $DB->count_records('local_gradesheet_categories', ['courseid' => $courseid]);
-        $DB->insert_record('local_gradesheet_categories', (object)[
-            'courseid'  => $courseid,
-            'name'      => $name,
-            'weight'    => $weight,
-            'sortorder' => $sortorder,
-        ]);
-        redirect($catsurl, "Category '" . s(trim($name)) . "' added!", null,
-            \core\output\notification::NOTIFY_SUCCESS);
-    }
+                helper::ensure_course_defaults($courseid);
+                $existing = $DB->get_record('local_gradesheet_config', ['courseid' => $courseid], '*', MUST_EXIST);
+                foreach ($details as $k => $v) {
+                    $existing->$k = $v;
+                }
+                $existing->timemodified = time();
+                $DB->update_record('local_gradesheet_config', $existing);
+                helper::reset_caches();
 
-    // Update an existing category
-    if ($action === 'updatecategory') {
-        $catid  = required_param('catid', PARAM_INT);
-        $name   = mb_substr(required_param('catname', PARAM_TEXT), 0, 100);
-        $weight = required_param('catweight', PARAM_FLOAT);
+                $warn = [];
+                $groupcount = count(groups_get_all_groups($courseid));
+                if ($courseandyear === '' && $groupcount === 0) {
+                    $warn[] = 'Course and Year is blank and this course has no groups, so the section line on the sheet will be empty.';
+                }
+                if ($schedule === '' || strtoupper($schedule) === 'TBA') {
+                    $warn[] = 'Schedule of Classes is not set.';
+                }
+                $thisyear = (int)date('Y');
+                if ((int)$m[1] < $thisyear - 1 || (int)$m[1] > $thisyear + 1) {
+                    $warn[] = 'School Year ' . $schoolyear . ' is far from the current year; double-check it.';
+                }
+                $ok($settingsurl, 'Course details saved!', $warn);
+                break;
 
-        $category = $DB->get_record('local_gradesheet_categories', ['id' => $catid, 'courseid' => $courseid]);
-        if (!$category || empty($name) || $weight < 0) {
-            redirect($catsurl, 'Category could not be updated. Provide a name and a non-negative weight.', null,
-                \core\output\notification::NOTIFY_ERROR);
-        }
-        if ($duplicate_category_name($name, $catid)) {
-            redirect($catsurl, 'A category named "' . s(trim($name)) . '" already exists.', null,
-                \core\output\notification::NOTIFY_WARNING);
-        }
-        $category->name = $name;
-        $category->weight = $weight;
-        $DB->update_record('local_gradesheet_categories', $category);
-        redirect(
-            $catsurl,
-            "Category '" . s(trim($name)) . "' updated!",
-            null,
-            \core\output\notification::NOTIFY_SUCCESS
-        );
-    }
+            // ── Computation rules ────────────────────────────────────────────
+            case 'saverules':
+                $mw = $read_number('midtermweight', 'Midterm share of final average', 0, 100, true, $rulesurl);
+                helper::ensure_course_defaults($courseid);
+                $existing = $DB->get_record('local_gradesheet_config', ['courseid' => $courseid], '*', MUST_EXIST);
+                $existing->missingaszero = optional_param('missingaszero', 0, PARAM_INT) ? 1 : 0;
+                $existing->includehidden = optional_param('includehidden', 0, PARAM_INT) ? 1 : 0;
+                $existing->midtermweight = round($mw, 2);
+                $existing->roundaverage  = optional_param('roundaverage', 0, PARAM_INT) ? 1 : 0;
+                $existing->timemodified  = time();
+                $DB->update_record('local_gradesheet_config', $existing);
+                helper::reset_caches();
 
-    // Delete a category
-    if ($action === 'deletecategory') {
-        $catid    = required_param('catid', PARAM_INT);
-        $catcount = $DB->count_records('local_gradesheet_categories', ['courseid' => $courseid]);
-        if ($catcount <= 1) {
-            redirect(
-                new moodle_url('/local/gradesheet/course_settings.php', ['courseid' => $courseid], 'grade-categories'),
-                get_string('warnlastcategory', 'local_gradesheet'),
-                null,
-                \core\output\notification::NOTIFY_WARNING
-            );
-        }
-        $DB->delete_records('local_gradesheet_categories', ['id' => $catid, 'courseid' => $courseid]);
-        // Remove mapping for items in this category
-        $DB->set_field('local_gradesheet_itemmap', 'categoryid', 0, [
-            'courseid' => $courseid, 'categoryid' => $catid
-        ]);
-        redirect($catsurl, 'Category deleted.', null,
-            \core\output\notification::NOTIFY_SUCCESS);
-    }
+                $warn = [];
+                if ($mw == 0 || $mw == 100) {
+                    $warn[] = 'With a midterm share of ' . $fmt($mw) . '% one period is ignored entirely in the final average.';
+                }
+                if (!$existing->includehidden && $DB->record_exists_select('grade_items', 'courseid = ? AND hidden <> 0', [$courseid])) {
+                    $warn[] = 'This course has hidden grade items; they are now excluded from the faculty computation.';
+                }
+                $ok($rulesurl, 'Computation rules saved!', $warn);
+                break;
 
-    // Add a new transmutation bracket
-    if ($action === 'addtransmute') {
-        $min   = required_param('tmin', PARAM_FLOAT);
-        $max   = required_param('tmax', PARAM_FLOAT);
-        $desc  = mb_substr(required_param('tdesc', PARAM_TEXT), 0, 100);
-        $equiv = mb_substr(trim(optional_param('tequiv', '', PARAM_TEXT)), 0, 10);
-        $ispassing = optional_param('tispassing', 0, PARAM_INT) ? 1 : 0;
-        if ($max < $min) {
-            redirect($scaleurl, 'Max score must be greater than or equal to min score.', null,
-                \core\output\notification::NOTIFY_ERROR);
-        }
-        $sortorder = $DB->count_records('local_gradesheet_transmute', ['courseid' => $courseid]);
-        $DB->insert_record('local_gradesheet_transmute', (object)[
-            'courseid'   => $courseid,
-            'minscore'   => $min,
-            'maxscore'   => $max,
-            'equivalent' => $equiv,
-            'descriptor' => $desc,
-            'sortorder'  => $sortorder,
-            'ispassing'  => $ispassing,
-        ]);
-        redirect($scaleurl, 'Bracket added!', null, \core\output\notification::NOTIFY_SUCCESS);
-    }
+            // ── Transmutation formula ────────────────────────────────────────
+            case 'saveformula':
+                $mode     = optional_param('transmutemode', 'essu', PARAM_ALPHA) === 'formula' ? 'formula' : 'essu';
+                $formulat = $read_text('formula', 'Formula', 255, $mode === 'formula', $formulaurl);
+                $fmin     = $read_number('formulamin', 'Minimum grade', null, null, false, $formulaurl);
+                $fmax     = $read_number('formulamax', 'Maximum grade', null, null, false, $formulaurl);
+                $decimals = optional_param('formuladecimals', 1, PARAM_INT);
+                $passmark = $read_number('passmark', 'Passing mark', 0, 100, true, $formulaurl);
 
-    // Update an existing transmutation bracket
-    if ($action === 'updatetransmute') {
-        $tid   = required_param('tid', PARAM_INT);
-        $min   = required_param('tmin', PARAM_FLOAT);
-        $max   = required_param('tmax', PARAM_FLOAT);
-        $desc  = mb_substr(required_param('tdesc', PARAM_TEXT), 0, 100);
-        $equiv = mb_substr(trim(optional_param('tequiv', '', PARAM_TEXT)), 0, 10);
-        $ispassing = optional_param('tispassing', 0, PARAM_INT) ? 1 : 0;
+                if ($mode === 'formula') {
+                    $err = \local_gradesheet\formula::validate($formulat);
+                    if ($err !== '') {
+                        $fail($formulaurl, 'Formula not saved: ' . $err);
+                    }
+                }
+                if ($fmin !== null && $fmax !== null && $fmin > $fmax) {
+                    $fail($formulaurl, 'Minimum grade (' . $fmt($fmin) . ') cannot be greater than the maximum grade (' . $fmt($fmax) . ').');
+                }
+                if (!in_array($decimals, [0, 1, 2], true)) {
+                    $fail($formulaurl, 'Decimals shown must be 0, 1 or 2.');
+                }
 
-        $row = $DB->get_record('local_gradesheet_transmute', ['id' => $tid, 'courseid' => $courseid]);
-        if (!$row) {
-            redirect($scaleurl, 'That bracket no longer exists.', null,
-                \core\output\notification::NOTIFY_ERROR);
-        }
-        if ($max < $min) {
-            redirect($scaleurl, 'Max score must be greater than or equal to min score.', null,
-                \core\output\notification::NOTIFY_ERROR);
-        }
-        $row->minscore   = $min;
-        $row->maxscore   = $max;
-        $row->equivalent = $equiv;
-        $row->descriptor = $desc;
-        $row->ispassing  = $ispassing;
-        $DB->update_record('local_gradesheet_transmute', $row);
-        redirect($scaleurl, 'Bracket updated!', null, \core\output\notification::NOTIFY_SUCCESS);
-    }
+                helper::ensure_course_defaults($courseid);
+                $existing = $DB->get_record('local_gradesheet_config', ['courseid' => $courseid], '*', MUST_EXIST);
+                $existing->transmutemode   = $mode;
+                $existing->formula         = $formulat;
+                $existing->formulamin      = ($fmin === null) ? null : round($fmin, 2);
+                $existing->formulamax      = ($fmax === null) ? null : round($fmax, 2);
+                $existing->formuladecimals = $decimals;
+                $existing->passmark        = round($passmark, 2);
+                $existing->timemodified    = time();
+                $DB->update_record('local_gradesheet_config', $existing);
+                helper::reset_caches();
 
-    // Delete a transmutation bracket
-    if ($action === 'deletetransmute') {
-        $tid = required_param('tid', PARAM_INT);
-        $DB->delete_records('local_gradesheet_transmute', ['id' => $tid, 'courseid' => $courseid]);
-        redirect($scaleurl, 'Bracket deleted.', null, \core\output\notification::NOTIFY_SUCCESS);
-    }
+                $warn = [];
+                if ($mode === 'formula') {
+                    $fs = helper::get_formula_settings($courseid);
+                    $g0   = helper::apply_formula(0.0, $fs);
+                    $g100 = helper::apply_formula(100.0, $fs);
+                    $gpm  = helper::apply_formula($passmark, $fs);
+                    if ($g0 !== null && $g100 !== null && $g0 == $g100) {
+                        $warn[] = 'The formula gives the same grade (' . $fmt($g0) . ') for 0% and 100%; the clamp or formula may be wrong.';
+                    }
+                    if ($fmin !== null && $fmax !== null && $g0 !== null && $g100 !== null) {
+                        $lo = min($g0, $g100);
+                        $hi = max($g0, $g100);
+                        if ($hi <= $fmin || $lo >= $fmax) {
+                            $warn[] = 'Every result falls outside the min/max clamp, so all students would get the same grade.';
+                        }
+                    }
+                    if ($gpm !== null) {
+                        $warn[] = 'A student exactly at the passing mark (' . $fmt($passmark) . '%) will print ' . number_format($gpm, $fs['decimals']) . '.';
+                    }
+                }
+                $ok($formulaurl, 'Transmutation settings saved!', $warn);
+                break;
 
-    // Reset to the default ESSU scale (deletes all custom brackets for this course)
-    if ($action === 'resetscale') {
-        $DB->delete_records('local_gradesheet_transmute', ['courseid' => $courseid]);
-        redirect($scaleurl, 'Reverted to the default grading scale.', null,
-            \core\output\notification::NOTIFY_SUCCESS);
-    }
-
-    // Save grade item mapping
-    if ($action === 'savemapping') {
-        $validcategories = $DB->get_records('local_gradesheet_categories', ['courseid' => $courseid], '', 'id');
-        foreach ($gitems as $gitem) {
-            $period   = optional_param('period_' . $gitem->id,  'finals', PARAM_TEXT);
-            $catid    = optional_param('cat_'    . $gitem->id,  0,        PARAM_INT);
-            $period   = in_array($period, ['midterm', 'finals']) ? $period : 'finals';
-
-            if ($catid > 0 && !isset($validcategories[$catid])) {
-                $catid = 0;
-            }
-
-            $existing = $DB->get_record('local_gradesheet_itemmap', [
-                'courseid' => $courseid, 'gradeitemid' => $gitem->id,
-            ]);
-            if ($existing) {
-                $existing->period     = $period;
-                $existing->categoryid = $catid;
-                $DB->update_record('local_gradesheet_itemmap', $existing);
-            } else {
-                $DB->insert_record('local_gradesheet_itemmap', (object)[
-                    'courseid'    => $courseid,
-                    'gradeitemid' => $gitem->id,
-                    'period'      => $period,
-                    'categoryid'  => $catid,
+            // ── Per-section overrides ────────────────────────────────────────
+            case 'savegroupcfg':
+                $gid = optional_param('groupid', 0, PARAM_INT);
+                if ($gid <= 0 || !$DB->record_exists('groups', ['id' => $gid, 'courseid' => $courseid])) {
+                    $fail($groupsurl, 'That group does not belong to this course (it may have been deleted).');
+                }
+                $g_label = $read_text('g_courseandyear', 'Section label', 50,  false, $groupsurl);
+                $g_sched = $read_text('g_schedule',      'Schedule',      50,  false, $groupsurl);
+                $g_instr = $read_text('g_instructor',    'Instructor',    100, false, $groupsurl);
+                helper::set_group_overrides($courseid, $gid, [
+                    'courseandyear' => $g_label, 'schedule' => $g_sched, 'instructor' => $g_instr,
                 ]);
-            }
+                $gname = format_string($DB->get_field('groups', 'name', ['id' => $gid]));
+                $ok($groupsurl, ($g_label === '' && $g_sched === '' && $g_instr === '')
+                    ? 'Overrides cleared for ' . s($gname) . '; it now uses the course-wide values.'
+                    : 'Section overrides saved for ' . s($gname) . '!');
+                break;
+
+            // ── Categories ───────────────────────────────────────────────────
+            case 'addcategory':
+                $name   = $read_text('catname', 'Category name', 100, true, $catsurl);
+                $weight = $read_number('catweight', 'Weight', 0, 100, true, $catsurl);
+                if ($duplicate_category_name($name)) {
+                    $fail($catsurl, 'A category named "' . s($name) . '" already exists.');
+                }
+                $sortorder = $DB->count_records('local_gradesheet_categories', ['courseid' => $courseid]);
+                $DB->insert_record('local_gradesheet_categories', (object)[
+                    'courseid' => $courseid, 'name' => $name, 'weight' => round($weight, 2), 'sortorder' => $sortorder,
+                ]);
+                helper::reset_caches();
+                $ok($catsurl, "Category '" . s($name) . "' added.", $weight_note());
+                break;
+
+            case 'updatecategory':
+                $catid    = optional_param('catid', 0, PARAM_INT);
+                $category = $catid ? $DB->get_record('local_gradesheet_categories', ['id' => $catid, 'courseid' => $courseid]) : null;
+                if (!$category) {
+                    $fail($catsurl, 'That category no longer exists.');
+                }
+                $name   = $read_text('catname', 'Category name', 100, true, $catsurl);
+                $weight = $read_number('catweight', 'Weight', 0, 100, true, $catsurl);
+                if ($duplicate_category_name($name, $catid)) {
+                    $fail($catsurl, 'A category named "' . s($name) . '" already exists.');
+                }
+                $category->name   = $name;
+                $category->weight = round($weight, 2);
+                $DB->update_record('local_gradesheet_categories', $category);
+                helper::reset_caches();
+                $warn = $weight_note();
+                if ($weight == 0 && $DB->record_exists('local_gradesheet_itemmap', ['courseid' => $courseid, 'categoryid' => $catid])) {
+                    $warn[] = 'Items mapped to "' . s($name) . '" now contribute 0% because its weight is 0.';
+                }
+                $ok($catsurl, "Category '" . s($name) . "' updated.", $warn);
+                break;
+
+            case 'deletecategory':
+                $catid    = optional_param('catid', 0, PARAM_INT);
+                $category = $catid ? $DB->get_record('local_gradesheet_categories', ['id' => $catid, 'courseid' => $courseid]) : null;
+                if (!$category) {
+                    $fail($catsurl, 'That category no longer exists.');
+                }
+                if ($DB->count_records('local_gradesheet_categories', ['courseid' => $courseid]) <= 1) {
+                    $fail($catsurl, get_string('warnlastcategory', 'local_gradesheet'));
+                }
+                $affected = $DB->count_records('local_gradesheet_itemmap', ['courseid' => $courseid, 'categoryid' => $catid]);
+                $DB->delete_records('local_gradesheet_categories', ['id' => $catid, 'courseid' => $courseid]);
+                $DB->set_field('local_gradesheet_itemmap', 'categoryid', 0, ['courseid' => $courseid, 'categoryid' => $catid]);
+                helper::reset_caches();
+                $warn = $weight_note();
+                if ($affected > 0) {
+                    $warn[] = $affected . ' grade item(s) that were in "' . s($category->name) . '" are now unmapped and excluded from computation until you re-map them.';
+                }
+                $ok($catsurl, 'Category "' . s($category->name) . '" deleted.', $warn);
+                break;
+
+            // ── Rating brackets ──────────────────────────────────────────────
+            case 'addtransmute':
+            case 'updatetransmute':
+                $row = null;
+                if ($action === 'updatetransmute') {
+                    $tid = optional_param('tid', 0, PARAM_INT);
+                    $row = $tid ? $DB->get_record('local_gradesheet_transmute', ['id' => $tid, 'courseid' => $courseid]) : null;
+                    if (!$row) {
+                        $fail($scaleurl, 'That bracket no longer exists.');
+                    }
+                }
+                $min   = $read_number('tmin', 'Min score', 0, 100, true, $scaleurl);
+                $max   = $read_number('tmax', 'Max score', 0, 100, true, $scaleurl);
+                $desc  = $read_text('tdesc',  'Descriptor', 100, false, $scaleurl);
+                $equiv = $read_text('tequiv', 'Equivalent', 10,  false, $scaleurl);
+                $ispassing = optional_param('tispassing', 0, PARAM_INT) ? 1 : 0;
+                if ($max < $min) {
+                    $fail($scaleurl, 'Max score (' . $fmt($max) . ') must be greater than or equal to Min score (' . $fmt($min) . ').');
+                }
+                if ($desc === '' && $equiv === '') {
+                    $fail($scaleurl, 'Give the bracket a Descriptor (adjectival rating) or an Equivalent; a bracket with neither prints nothing.');
+                }
+                // Exact duplicate range is almost certainly a double-submit.
+                $others = $DB->get_records('local_gradesheet_transmute', ['courseid' => $courseid]);
+                $overlaps = [];
+                foreach ($others as $o) {
+                    if ($row && (int)$o->id === (int)$row->id) {
+                        continue;
+                    }
+                    if ((float)$o->minscore == $min && (float)$o->maxscore == $max) {
+                        $fail($scaleurl, 'A bracket covering ' . $fmt($min) . '-' . $fmt($max) . ' already exists.');
+                    }
+                    if ($min <= (float)$o->maxscore && $max >= (float)$o->minscore) {
+                        $overlaps[] = $fmt((float)$o->minscore) . '-' . $fmt((float)$o->maxscore);
+                    }
+                }
+
+                if ($row) {
+                    $row->minscore = $min; $row->maxscore = $max; $row->equivalent = $equiv;
+                    $row->descriptor = $desc; $row->ispassing = $ispassing;
+                    $DB->update_record('local_gradesheet_transmute', $row);
+                } else {
+                    $DB->insert_record('local_gradesheet_transmute', (object)[
+                        'courseid' => $courseid, 'minscore' => $min, 'maxscore' => $max, 'equivalent' => $equiv,
+                        'descriptor' => $desc, 'sortorder' => count($others), 'ispassing' => $ispassing,
+                    ]);
+                }
+                helper::reset_caches();
+                $warn = [];
+                if ($overlaps) {
+                    $warn[] = 'This bracket overlaps ' . implode(', ', $overlaps) . '; the higher bracket wins for scores in the overlap.';
+                }
+                $warn = array_merge($warn, array_map('strip_tags', helper::validate_custom_scale($courseid)));
+                $ok($scaleurl, $row ? 'Bracket updated.' : 'Bracket added.', $warn);
+                break;
+
+            case 'deletetransmute':
+                $tid = optional_param('tid', 0, PARAM_INT);
+                if (!$tid || !$DB->record_exists('local_gradesheet_transmute', ['id' => $tid, 'courseid' => $courseid])) {
+                    $fail($scaleurl, 'That bracket no longer exists.');
+                }
+                $DB->delete_records('local_gradesheet_transmute', ['id' => $tid, 'courseid' => $courseid]);
+                helper::reset_caches();
+                $left = $DB->count_records('local_gradesheet_transmute', ['courseid' => $courseid]);
+                $ok($scaleurl, 'Bracket deleted.', $left === 0 ? ['No brackets left: the default ESSU ranges are used for the rating legend.'] : array_map('strip_tags', helper::validate_custom_scale($courseid)));
+                break;
+
+            case 'resetscale':
+                $n = $DB->count_records('local_gradesheet_transmute', ['courseid' => $courseid]);
+                $DB->delete_records('local_gradesheet_transmute', ['courseid' => $courseid]);
+                helper::reset_caches();
+                $ok($scaleurl, $n ? 'Removed ' . $n . ' bracket(s); reverted to the default ESSU ranges.' : 'There were no custom brackets to remove.');
+                break;
+
+            // ── Grade item mapping ───────────────────────────────────────────
+            case 'savemapping':
+                $validcategories = $DB->get_records('local_gradesheet_categories', ['courseid' => $courseid], '', 'id');
+                $dropped = 0;
+                foreach ($gitems as $gitem) {
+                    $period = optional_param('period_' . $gitem->id, 'finals', PARAM_ALPHA);
+                    $catid  = optional_param('cat_' . $gitem->id, 0, PARAM_INT);
+                    $period = in_array($period, ['midterm', 'finals'], true) ? $period : 'finals';
+                    if ($catid > 0 && !isset($validcategories[$catid])) {
+                        $catid = 0; // Category vanished between page load and save.
+                        $dropped++;
+                    }
+                    $existing = $DB->get_record('local_gradesheet_itemmap', ['courseid' => $courseid, 'gradeitemid' => $gitem->id]);
+                    if ($existing) {
+                        $existing->period = $period;
+                        $existing->categoryid = $catid;
+                        $DB->update_record('local_gradesheet_itemmap', $existing);
+                    } else {
+                        $DB->insert_record('local_gradesheet_itemmap', (object)[
+                            'courseid' => $courseid, 'gradeitemid' => $gitem->id, 'period' => $period, 'categoryid' => $catid,
+                        ]);
+                    }
+                }
+                helper::reset_caches();
+                $warn = [];
+                if ($dropped > 0) {
+                    $warn[] = $dropped . ' item(s) pointed to a category that no longer exists and were left unmapped.';
+                }
+                $mw = helper::get_mapping_warnings($courseid);
+                if ($mw) {
+                    if ($mw['unmapped'] > 0) {
+                        $warn[] = get_string('warnunmappeditems', 'local_gradesheet', $mw['unmapped']);
+                    }
+                    if ($mw['midterm'] === 0) {
+                        $warn[] = get_string('warnnoperioditems', 'local_gradesheet', 'Midterm');
+                    }
+                    if ($mw['finals'] === 0) {
+                        $warn[] = get_string('warnnoperioditems', 'local_gradesheet', 'Finals');
+                    }
+                }
+                $ok($mapurl, 'Grade item mapping saved!', $warn);
+                break;
+
+            case '':
+                $fail($settingsurl, 'Nothing was submitted (the form had no action).');
+                break;
+
+            default:
+                $fail($settingsurl, 'Unknown action "' . s($action) . '". Nothing was changed.');
         }
-        redirect($mapurl, 'Grade item mapping saved!', null, \core\output\notification::NOTIFY_SUCCESS);
+    } catch (\dml_exception $e) {
+        // A database-level failure (constraint, connection, bad value) should
+        // land back on the settings page, not on a Moodle error screen.
+        $fail($settingsurl, 'Could not save because of a database error: ' . s($e->getMessage()) . ' Nothing was changed.');
     }
 }
 
 // ── LOAD DATA ─────────────────────────────────────────────────────────────────
 $config     = $DB->get_record('local_gradesheet_config', ['courseid' => $courseid]);
 $rules      = helper::get_computation_rules($courseid);
+$health     = helper::settings_health($courseid);
+$healthcounts = ['danger' => 0, 'warning' => 0, 'info' => 0];
+foreach ($health as $h) {
+    $healthcounts[$h['level']]++;
+}
 $detected   = helper::detect_signatories($courseid);
 $fs         = helper::get_formula_settings($courseid);
 $presets    = helper::formula_presets();
@@ -359,8 +517,36 @@ echo '<div class="local-gradesheet-page">';
     <a href="index.php?courseid=<?php echo $courseid; ?>" class="btn btn-secondary mb-3">← Back to Grade Sheet</a>
     <hr>
 
+    <!-- Needs attention: everything that would make the printed sheet wrong, blocked, or incomplete -->
+    <?php if (empty($health)): ?>
+        <?php echo \local_gradesheet\helper::render_alert('<strong>All checks passed.</strong> Weights, mapping, formula, header and signatories are all in order.', 'success', '&#10003;'); ?>
+    <?php else:
+        $panelclass = $healthcounts['danger'] ? 'danger' : ($healthcounts['warning'] ? 'warning' : 'info');
+        $icons = ['danger' => '&#10060;', 'warning' => '&#9888;', 'info' => '&#8505;'];
+    ?>
+        <div class="card mb-4 border-<?php echo $panelclass; ?>" id="needs-attention">
+            <div class="card-header bg-<?php echo $panelclass; ?> <?php echo $panelclass === 'warning' ? 'text-dark' : 'text-white'; ?>">
+                <strong>Needs attention</strong>
+                <span class="small ml-2 ms-2">
+                    <?php if ($healthcounts['danger']): ?><?php echo $healthcounts['danger']; ?> blocking &middot; <?php endif; ?>
+                    <?php if ($healthcounts['warning']): ?><?php echo $healthcounts['warning']; ?> warning(s) &middot; <?php endif; ?>
+                    <?php echo $healthcounts['info']; ?> note(s)
+                </span>
+            </div>
+            <ul class="list-group list-group-flush">
+                <?php foreach ($health as $h): ?>
+                    <li class="list-group-item d-flex align-items-start py-2">
+                        <span class="mr-2 me-2 text-<?php echo $h['level']; ?>" style="min-width:1.5em"><?php echo $icons[$h['level']]; ?></span>
+                        <span class="flex-grow-1"><?php echo $h['text']; ?></span>
+                        <a href="#<?php echo s($h['anchor']); ?>" class="btn btn-outline-secondary btn-sm ml-2 ms-2 text-nowrap">Fix &rarr;</a>
+                    </li>
+                <?php endforeach; ?>
+            </ul>
+        </div>
+    <?php endif; ?>
+
     <!-- SECTION 1: Course Details -->
-    <div class="card mb-4">
+    <div class="card mb-4" id="course-details">
         <div class="card-header bg-dark text-white">
             <strong>Course Details & Signatories</strong>
         </div>
@@ -385,32 +571,41 @@ echo '<div class="local-gradesheet-page">';
                 <div class="form-group row mb-3">
                     <label class="col-sm-4 col-form-label"><strong>School Year</strong></label>
                     <div class="col-sm-4">
-                        <input type="text" name="schoolyear" class="form-control" maxlength="20"
-                               value="<?php echo $config ? s($config->schoolyear) : '2025-2026'; ?>">
+                        <input type="text" name="schoolyear" class="form-control" maxlength="20" required
+                               pattern="\d{4}\s*-\s*\d{4}" title="Two consecutive years, e.g. 2026-2027" placeholder="e.g. <?php echo date('Y') . '-' . (date('Y') + 1); ?>"
+                               value="<?php echo $config ? s($config->schoolyear) : date('Y') . '-' . (date('Y') + 1); ?>">
                     </div>
                 </div>
 
                 <hr><h6 class="text-muted mb-3">- Course Information -</h6>
 
                 <?php
+                // [label, placeholder, maxlen, required, hint]
                 $fields = [
-                    'coursenumber'  => ['Subject and Course No.', 'e.g. CS 101', 50],
-                    'descriptive'   => ['Descriptive Title',      'e.g. Computer Programming 1', 100],
-                    'courseandyear' => ['Course and Year',         'e.g. BSCS 2A', 50],
-                    'schedule'      => ['Schedule of Classes',     'e.g. MWF 8:00-9:00 AM', 50],
-                    'units'         => ['Number of Units',         'e.g. 3', 10],
+                    'coursenumber'  => ['Subject and Course No.', 'e.g. CS 101', 50, true, ''],
+                    'descriptive'   => ['Descriptive Title',      'e.g. Computer Programming 1', 100, true, ''],
+                    'courseandyear' => ['Course and Year',         'e.g. BSCS 2A', 50, false, empty($coursegroups) ? '' : 'Overridden per section by the group name (see Per-Section Overrides).'],
+                    'schedule'      => ['Schedule of Classes',     'e.g. MWF 8:00-9:00 AM', 50, false, empty($coursegroups) ? '' : 'Course-wide default; sections can override it below.'],
                 ];
-                foreach ($fields as $fname => [$label, $placeholder, $maxlen]):
+                foreach ($fields as $fname => [$label, $placeholder, $maxlen, $req, $hint]):
                 ?>
                 <div class="form-group row mb-3">
-                    <label class="col-sm-4 col-form-label"><strong><?php echo $label; ?></strong></label>
+                    <label class="col-sm-4 col-form-label"><strong><?php echo $label; ?></strong><?php echo $req ? ' <span class="text-danger">*</span>' : ''; ?></label>
                     <div class="col-sm-6">
-                        <input type="text" name="<?php echo $fname; ?>" class="form-control" maxlength="<?php echo $maxlen; ?>"
+                        <input type="text" name="<?php echo $fname; ?>" class="form-control" maxlength="<?php echo $maxlen; ?>" <?php echo $req ? 'required' : ''; ?>
                                value="<?php echo $config && isset($config->$fname) ? s($config->$fname) : ''; ?>"
                                placeholder="<?php echo $placeholder; ?>">
+                        <?php if ($hint !== ''): ?><small class="form-text text-muted"><?php echo $hint; ?></small><?php endif; ?>
                     </div>
                 </div>
                 <?php endforeach; ?>
+                <div class="form-group row mb-3">
+                    <label class="col-sm-4 col-form-label"><strong>Number of Units</strong> <span class="text-danger">*</span></label>
+                    <div class="col-sm-3">
+                        <input type="number" name="units" class="form-control" min="0" max="12" step="0.5" required placeholder="e.g. 3"
+                               value="<?php echo $config && isset($config->units) ? s($config->units) : '3'; ?>">
+                    </div>
+                </div>
 
                 <hr><h6 class="text-muted mb-1">- Signatories -</h6>
                 <p class="text-muted small mb-3">
@@ -663,13 +858,13 @@ echo '<div class="local-gradesheet-page">';
                 <div class="form-row align-items-end">
                     <div class="col-md-5">
                         <label><strong>Category Name</strong></label>
-                        <input type="text" name="catname" class="form-control" maxlength="100"
+                        <input type="text" name="catname" class="form-control" maxlength="100" required
                                placeholder="e.g. Quizzes, Exams, Projects, Attendance">
                     </div>
                     <div class="col-md-3">
                         <label><strong>Weight (%)</strong></label>
                         <input type="number" name="catweight" class="form-control"
-                               placeholder="e.g. 30" min="0" max="100" step="0.01">
+                               placeholder="e.g. 30" min="0" max="100" step="0.01" required>
                     </div>
                     <div class="col-md-2 mt-2">
                         <button type="submit" class="btn btn-primary w-100">Add</button>
