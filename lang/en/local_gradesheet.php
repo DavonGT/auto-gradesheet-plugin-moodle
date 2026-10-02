@@ -20,3 +20,13 @@ $string['gradesheet:manage']   = 'Manage grade sheets';
 $string['warnunmappeditems']   = '{$a} grade item(s) are not mapped to any category and are excluded from grade computation.';
 $string['warnnoperioditems']   = 'No grade items are mapped to {$a}. That column will show "-" and the final average falls back to the period that has items.';
 $string['warnlastcategory']    = 'The last remaining grade category cannot be deleted.';
+
+// Admin settings: signatory auto-detection.
+$string['signatoryroles']          = 'Signatory auto-detection';
+$string['signatoryroles_desc']     = 'Grade sheets fill in the Instructor, Department Head, Registrar and College Dean lines automatically from Moodle role assignments when the course has not typed a name. The Instructor is the editing teacher of the course (or section). The other three are looked up by role, searching upward from the course through its categories to the site: assign the Department Head role at the department/program category, the College Dean role at the college category, and the Registrar role at the system level (Site administration > Users > Permissions > Assign system roles). The roles below are created by the plugin on install; change the shortnames here only if your site already uses different roles.';
+$string['role_departmenthead']     = 'Department Head role';
+$string['role_departmenthead_desc'] = 'Shortname of the role whose holder signs as Department Head.';
+$string['role_collegedean']        = 'College Dean role';
+$string['role_collegedean_desc']   = 'Shortname of the role whose holder signs as College Dean.';
+$string['role_registrar']          = 'Registrar role';
+$string['role_registrar_desc']     = 'Shortname of the role whose holder signs as Registrar.';

@@ -18,29 +18,25 @@ class gradesheet_service {
             if ($group && !empty($group->name)) {
                 $cfg['courseandyear'] = $group->name;
             }
-            if (!empty($ctx)) {
-                $groupteachers = get_enrolled_users($ctx, 'local/gradesheet:manage', $groupid, 'u.id, u.firstname, u.lastname');
-                if (!empty($groupteachers)) {
-                    if (isset($USER->id, $groupteachers[$USER->id])) {
-                        $cfg['instructor'] = strtoupper(trim(fullname($groupteachers[$USER->id])));
-                    } else if (count($groupteachers) === 1) {
-                        $gt = reset($groupteachers);
-                        $cfg['instructor'] = strtoupper(trim(fullname($gt)));
-                    }
-                }
-            }
-
-            // Per-section overrides saved in Settings win over the derived
-            // values above and over the course-wide config.
+            // Per-section overrides saved in Settings win over the course-wide config.
             $override = helper::get_group_overrides($courseid, $groupid);
             if ($override) {
-                foreach (['courseandyear', 'schedule', 'instructor'] as $f) {
+                foreach (['courseandyear', 'schedule'] as $f) {
                     if (!empty($override->$f)) {
                         $cfg[$f] = $override->$f;
                     }
                 }
             }
         }
+
+        // Signatories: typed names or, when blank, auto-detected from Moodle
+        // roles. One precedence rule shared with the dashboard (helper::resolve_signatories).
+        $signatories = helper::resolve_signatories($cfg, $courseid, $groupid);
+        $cfg['instructor']  = $signatories['instructor']['name'];
+        $cfg['depthead']    = $signatories['department_head']['name'];
+        $cfg['registrar']   = $signatories['registrar']['name'];
+        $cfg['collegedean'] = $signatories['college_dean']['name'];
+        $cfg['signatories'] = $signatories;
 
         $categories = $DB->get_records('local_gradesheet_categories',
             ['courseid' => $courseid], 'sortorder ASC');

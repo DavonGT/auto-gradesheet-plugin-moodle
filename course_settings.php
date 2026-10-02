@@ -318,6 +318,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 // ── LOAD DATA ─────────────────────────────────────────────────────────────────
 $config     = $DB->get_record('local_gradesheet_config', ['courseid' => $courseid]);
 $rules      = helper::get_computation_rules($courseid);
+$detected   = helper::detect_signatories($courseid);
 $fs         = helper::get_formula_settings($courseid);
 $presets    = helper::formula_presets();
 // Preview of the active formula at representative raw percentages.
@@ -411,7 +412,13 @@ echo '<div class="local-gradesheet-page">';
                 </div>
                 <?php endforeach; ?>
 
-                <hr><h6 class="text-muted mb-3">- Signatories -</h6>
+                <hr><h6 class="text-muted mb-1">- Signatories -</h6>
+                <p class="text-muted small mb-3">
+                    Leave a field <strong>blank</strong> to use the name auto-detected from Moodle roles
+                    (Instructor = the course/section teacher; the others = holders of the Department Head,
+                    Registrar and College Dean roles in this course's category tree or the site).
+                    Type a name only to override.
+                </p>
 
                 <?php
                 $sigs = [
@@ -421,13 +428,28 @@ echo '<div class="local-gradesheet-page">';
                     'college_dean'    => 'College Dean',
                 ];
                 foreach ($sigs as $fname => $label):
+                    $stored  = ($config && isset($config->$fname)) ? (string)$config->$fname : '';
+                    $isblank = helper::signatory_is_blank($stored);
+                    $det     = $detected[$fname];
                 ?>
                 <div class="form-group row mb-3">
                     <label class="col-sm-4 col-form-label"><strong><?php echo $label; ?></strong></label>
                     <div class="col-sm-6">
-                        <input type="text" name="<?php echo $fname; ?>" class="form-control" maxlength="100"
-                               value="<?php echo $config && isset($config->$fname) ? s($config->$fname) : ''; ?>"
-                               placeholder="Full name in CAPS">
+                        <input type="text" name="<?php echo $fname; ?>" id="sig-<?php echo $fname; ?>" class="form-control" maxlength="100"
+                               value="<?php echo $isblank ? '' : s($stored); ?>"
+                               placeholder="<?php echo $det['name'] !== '' ? s($det['name']) : 'Auto-detect (nothing found yet)'; ?>">
+                        <small class="form-text">
+                            <?php if ($det['name'] !== ''): ?>
+                                <span class="text-success">&#10003; Auto-detected: <strong><?php echo s($det['name']); ?></strong></span>
+                                <span class="text-muted">(<?php echo s($det['source']); ?>)</span>
+                                <?php if (!$isblank): ?>
+                                    &mdash; <span class="text-warning">overridden by the typed name</span>
+                                    <a href="#" onclick="document.getElementById('sig-<?php echo $fname; ?>').value=''; return false;">use auto-detect</a>
+                                <?php endif; ?>
+                            <?php else: ?>
+                                <span class="text-muted">&#9888; Not detected: <?php echo s($det['source']); ?>.<?php echo $isblank ? ' This line will print blank until a role is assigned or a name is typed.' : ''; ?></span>
+                            <?php endif; ?>
+                        </small>
                     </div>
                 </div>
                 <?php endforeach; ?>

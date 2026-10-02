@@ -13,6 +13,7 @@
  *  - Computation rules (ungraded-as-zero, hidden items, midterm weight, rounding)
  *  - Custom scale equivalents and per-section header overrides
  *  - Formula-based transmutation (safe expression evaluator, clamp, passmark, legend)
+ *  - Signatory auto-detection from roles (instructor, dept head, registrar, dean)
  *  - Dynamic column whitelist injection resistance
  *  - Schema bounds & string truncation (OBS-03)
  *  - Roster computation service payload integrity
@@ -49,6 +50,13 @@ function format_string($str) {
     return (string)$str;
 }
 
+/** Minimal context tree: course -> (optional categories) -> system. */
+$MOCK_COURSE_PARENTS = []; // courseid => [mock_context, ...] from nearest category up to system
+class mock_context {
+    public int $id; public int $instanceid; public string $name;
+    public function __construct(int $id, string $name) { $this->id = $id; $this->instanceid = $id; $this->name = $name; }
+    public function get_context_name($withprefix = true, $short = false): string { return $this->name; }
+}
 class context_course {
     public int $id;
     public int $instanceid;
@@ -59,7 +67,24 @@ class context_course {
     public static function instance(int $courseid): self {
         return new self($courseid);
     }
+    public function get_parent_contexts(bool $includeself = false): array {
+        global $MOCK_COURSE_PARENTS;
+        $list = $includeself ? [$this] : [];
+        return array_merge($list, $MOCK_COURSE_PARENTS[$this->instanceid] ?? []);
+    }
+    public function get_context_name($withprefix = true, $short = false): string { return 'Course ' . $this->instanceid; }
 }
+function get_role_users($roleid, $context, $parent = false, $fields = '', $sort = ''): array {
+    global $DB;
+    $users = [];
+    foreach ($DB->tables['role_assignments'] as $ra) {
+        if ((int)$ra->roleid === (int)$roleid && (int)$ra->contextid === (int)$context->id && isset($DB->tables['user'][$ra->userid])) {
+            $users[$ra->userid] = $DB->tables['user'][$ra->userid];
+        }
+    }
+    return $users;
+}
+function get_config($plugin, $name = null) { return ''; }
 
 #[\AllowDynamicProperties]
 class grade_item {
@@ -115,6 +140,8 @@ class MockDB {
             'grade_items'                 => [],
             'grade_grades'                => [],
             'user'                        => [],
+            'role'                        => [],
+            'role_assignments'            => [],
         ];
         $this->auto_inc = 1;
     }
@@ -269,6 +296,11 @@ class MockDB {
             $this->tables[$table][$id]->$newfield = $newvalue;
         }
         return true;
+    }
+
+    public function get_field(string $table, string $return, array $conditions) {
+        $r = $this->get_record($table, $conditions);
+        return $r ? ($r->$return ?? false) : false;
     }
 
     public function get_fieldset_sql(string $sql, ?array $params = null): array {
@@ -889,6 +921,94 @@ $T->assertEqual("Empty formula: falls back (brackets exist -> raw score)", helpe
 
 // 10f. Courses without the new columns (pre-upgrade rows) behave exactly as before.
 $T->assertEqual("Legacy config row: built-in ESSU table still used", helper::transmute_equiv(90.0, 601), '1.5');
+
+// =========================================================================
+echo "\n======================================================================\n";
+echo "BATTERY 11: Signatory Auto-Detection From Roles\n";
+echo "======================================================================\n";
+// Context tree: course 801 -> category "BSCS Program" (ctx 9001) -> category "CCS" (ctx 9002) -> system (ctx 1).
+$courseid_sig = 801;
+$DB->insert_record('course', (object)['id' => $courseid_sig, 'fullname' => 'Sig Course', 'shortname' => 'SIG101']);
+$DB->insert_record('local_gradesheet_config', (object)[
+    'courseid' => $courseid_sig, 'semester' => 'First Semester', 'schoolyear' => '2026-2027', 'coursenumber' => 'SIG101',
+    'descriptive' => 'Sig Course', 'courseandyear' => '', 'schedule' => 'MW', 'units' => '3',
+    'instructor' => '', 'department_head' => 'DEPARTMENT HEAD', 'registrar' => '', 'college_dean' => 'TYPED DEAN NAME',
+    'missingaszero' => 0, 'includehidden' => 1, 'midtermweight' => 50, 'roundaverage' => 0, 'transmutemode' => 'essu',
+]);
+$MOCK_COURSE_PARENTS[$courseid_sig] = [new mock_context(9001, 'BSCS Program'), new mock_context(9002, 'CCS'), new mock_context(1, 'System')];
+$DB->insert_record('local_gradesheet_categories', (object)['courseid' => $courseid_sig, 'name' => 'All', 'weight' => 100.0, 'sortorder' => 0]);
+
+$r_dh  = $DB->insert_record('role', (object)['shortname' => 'departmenthead', 'name' => 'Department Head']);
+$r_reg = $DB->insert_record('role', (object)['shortname' => 'registrar',      'name' => 'Registrar']);
+$r_dn  = $DB->insert_record('role', (object)['shortname' => 'collegedean',    'name' => 'College Dean']);
+
+foreach ([
+    901 => ['Teodoro', 'Cruz'],      // editing teacher (only one)
+    902 => ['Maria',   'Santos'],    // department head @ program category
+    903 => ['Rolando', 'Dela Cruz'], // registrar @ system
+    904 => ['Lourdes', 'Garcia'],    // dean @ college category
+] as $uid => [$fn, $ln]) {
+    $DB->insert_record('user', (object)['id' => $uid, 'firstname' => $fn, 'lastname' => $ln, 'idnumber' => "U{$uid}"]);
+}
+$MOCK_ENROLLED_USERS[$courseid_sig] = [901 => true];
+$MOCK_CAPABILITIES["local/gradesheet:manage:901"] = true;
+$DB->insert_record('role_assignments', (object)['roleid' => $r_dh,  'userid' => 902, 'contextid' => 9001]);
+$DB->insert_record('role_assignments', (object)['roleid' => $r_reg, 'userid' => 903, 'contextid' => 1]);
+$DB->insert_record('role_assignments', (object)['roleid' => $r_dn,  'userid' => 904, 'contextid' => 9002]);
+
+$USER = (object)['id' => 999]; // an admin viewing, not a teacher
+helper::reset_caches();
+$det = helper::detect_signatories($courseid_sig);
+$T->assertEqual("Detect: only teacher becomes Instructor",            $det['instructor']['name'],      'TEODORO CRUZ');
+$T->assertEqual("Detect: Dept Head found at program category",        $det['department_head']['name'], 'MARIA SANTOS');
+$T->assertEqual("Detect: Registrar found at system context",          $det['registrar']['name'],       'ROLANDO DELA CRUZ');
+$T->assertEqual("Detect: Dean found at college category",             $det['college_dean']['name'],    'LOURDES GARCIA');
+$T->assert("Detect: source names the context it was found in",       strpos($det['college_dean']['source'], 'CCS') !== false);
+
+$export = gradesheet_service::compute_all_grades($courseid_sig);
+$T->assertEqual("Resolve: blank instructor -> auto",                  $export['instructor'],  'TEODORO CRUZ');
+$T->assertEqual("Resolve: legacy placeholder 'DEPARTMENT HEAD' treated as blank -> auto", $export['depthead'], 'MARIA SANTOS');
+$T->assertEqual("Resolve: blank registrar -> auto",                   $export['registrar'],   'ROLANDO DELA CRUZ');
+$T->assertEqual("Resolve: typed dean name wins over the role holder", $export['collegedean'], 'TYPED DEAN NAME');
+$T->assertEqual("Resolve: 'how' flags typed vs auto",                 [$export['signatories']['college_dean']['how'], $export['signatories']['registrar']['how']], ['typed', 'auto']);
+
+// Nearest context wins: a second dean assigned at the program category outranks the college one.
+$DB->insert_record('user', (object)['id' => 905, 'firstname' => 'Program', 'lastname' => 'Dean', 'idnumber' => 'U905']);
+$DB->insert_record('role_assignments', (object)['roleid' => $r_dn, 'userid' => 905, 'contextid' => 9001]);
+$det = helper::detect_signatories($courseid_sig);
+$T->assertEqual("Detect: nearest context wins (program-level dean over college-level)", $det['college_dean']['name'], 'PROGRAM DEAN');
+
+// Current user who is a teacher wins as instructor; two teachers with an outsider viewing -> nothing detected.
+$DB->insert_record('user', (object)['id' => 906, 'firstname' => 'Second', 'lastname' => 'Teacher', 'idnumber' => 'U906']);
+$MOCK_ENROLLED_USERS[$courseid_sig][906] = true;
+$MOCK_CAPABILITIES["local/gradesheet:manage:906"] = true;
+$USER = (object)['id' => 906];
+$det = helper::detect_signatories($courseid_sig);
+$T->assertEqual("Detect: viewing teacher is the Instructor when several teach", $det['instructor']['name'], 'SECOND TEACHER');
+$USER = (object)['id' => 999];
+$det = helper::detect_signatories($courseid_sig);
+$T->assertEqual("Detect: two teachers + outside viewer -> no instructor guessed", $det['instructor']['name'], '');
+$T->assert("Detect: explains why (2 teachers)", strpos($det['instructor']['source'], '2 teachers') !== false);
+
+// Section: the section's single teacher wins over the course-wide typed instructor.
+$cfg_sig = $DB->get_record('local_gradesheet_config', ['courseid' => $courseid_sig]);
+$cfg_sig->instructor = 'COURSE WIDE NAME';
+$DB->update_record('local_gradesheet_config', $cfg_sig);
+$g_sig = $DB->insert_record('groups', (object)['courseid' => $courseid_sig, 'name' => 'BSCS 1C']);
+$MOCK_GROUP_MEMBERS[] = "{$g_sig}:901";
+$export_course  = gradesheet_service::compute_all_grades($courseid_sig);
+$export_section = gradesheet_service::compute_all_grades($courseid_sig, $g_sig);
+$T->assertEqual("Resolve: course view with 2 teachers uses the typed course-wide name", $export_course['instructor'], 'COURSE WIDE NAME');
+$T->assertEqual("Resolve: section view uses the section's only teacher",              $export_section['instructor'], 'TEODORO CRUZ');
+helper::set_group_overrides($courseid_sig, $g_sig, ['courseandyear' => '', 'schedule' => '', 'instructor' => 'override name']);
+$export_section = gradesheet_service::compute_all_grades($courseid_sig, $g_sig);
+$T->assertEqual("Resolve: per-section override beats the detected section teacher", $export_section['instructor'], 'OVERRIDE NAME');
+
+// Missing role on the site is reported, not fatal.
+$DB->delete_records('role', ['id' => $r_reg]);
+$det = helper::detect_signatories($courseid_sig);
+$T->assertEqual("Detect: missing role -> blank name", $det['registrar']['name'], '');
+$T->assert("Detect: missing role -> explanatory source", strpos($det['registrar']['source'], 'does not exist') !== false);
 
 // =========================================================================
 echo "\n======================================================================\n";

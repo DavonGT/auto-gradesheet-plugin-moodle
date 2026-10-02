@@ -196,5 +196,21 @@ function xmldb_local_gradesheet_upgrade($oldversion) {
         upgrade_plugin_savepoint(true, 2026100300, 'local', 'gradesheet');
     }
 
+    if ($oldversion < 2026100400) {
+        // Signatory auto-detection: create the roles and blank out the old
+        // placeholder names so detection takes over where nobody typed a name.
+        \local_gradesheet\helper::ensure_signatory_roles();
+        $placeholders = [
+            'instructor'      => 'INSTRUCTOR NAME',
+            'department_head' => 'DEPARTMENT HEAD',
+            'registrar'       => 'REGISTRAR NAME',
+            'college_dean'    => 'COLLEGE DEAN',
+        ];
+        foreach ($placeholders as $col => $ph) {
+            $DB->set_field('local_gradesheet_config', $col, '', [$col => $ph]);
+        }
+        upgrade_plugin_savepoint(true, 2026100400, 'local', 'gradesheet');
+    }
+
     return true;
 }

@@ -109,10 +109,10 @@ class helper {
                 'courseandyear'   => 'BSCS 1A',
                 'schedule'        => 'TBA',
                 'units'           => '3',
-                'instructor'      => 'INSTRUCTOR NAME',
-                'department_head' => 'DEPARTMENT HEAD',
-                'registrar'       => 'REGISTRAR NAME',
-                'college_dean'    => 'COLLEGE DEAN',
+                'instructor'      => '',   // blank = auto-detect from roles
+                'department_head' => '',
+                'registrar'       => '',
+                'college_dean'    => '',
                 'missingaszero'   => 0,
                 'includehidden'   => 1,
                 'midtermweight'   => 50,
@@ -387,6 +387,170 @@ class helper {
             }
         }
         return $grade >= 75; // Default ESSU threshold.
+    }
+
+    /** Legacy placeholder values that mean "not set" (pre-1.10 defaults). */
+    const SIGNATORY_PLACEHOLDERS = ['INSTRUCTOR NAME', 'DEPARTMENT HEAD', 'REGISTRAR NAME', 'COLLEGE DEAN'];
+
+    /** Signatory key => [config column, admin-setting name, default role shortname, role display name]. */
+    public static function signatory_roles(): array {
+        return [
+            'instructor'      => ['instructor',      'role_instructor',     'editingteacher', 'Instructor'],
+            'department_head' => ['department_head', 'role_departmenthead', 'departmenthead', 'Department Head'],
+            'registrar'       => ['registrar',       'role_registrar',      'registrar',      'Registrar'],
+            'college_dean'    => ['college_dean',    'role_collegedean',    'collegedean',    'College Dean'],
+        ];
+    }
+
+    /** Role shortname configured for a signatory (admin setting, with default). */
+    public static function signatory_role_shortname(string $key): string {
+        $def = self::signatory_roles()[$key] ?? null;
+        if (!$def) {
+            return '';
+        }
+        $v = '';
+        if (function_exists('get_config')) {
+            $v = (string)get_config('local_gradesheet', $def[1]);
+        }
+        $v = trim($v);
+        return $v !== '' ? $v : $def[2];
+    }
+
+    /**
+     * Creates the Department Head / Registrar / College Dean roles if the site
+     * does not have them yet, assignable at category and system level. Called
+     * on install and upgrade so auto-detection works out of the box.
+     */
+    public static function ensure_signatory_roles(): void {
+        global $DB;
+        if (!function_exists('create_role')) {
+            return;
+        }
+        $wanted = [
+            'departmenthead' => ['Department Head', 'Signs grade sheets as Department Head. Assign at the department/program category.'],
+            'collegedean'    => ['College Dean',    'Signs grade sheets as College Dean. Assign at the college category.'],
+            'registrar'      => ['Registrar',       'Signs grade sheets as University Registrar. Assign at the system level.'],
+        ];
+        foreach ($wanted as $shortname => [$name, $desc]) {
+            try {
+                if ($DB->record_exists('role', ['shortname' => $shortname])) {
+                    continue;
+                }
+                $roleid = create_role($name, $shortname, $desc);
+                set_role_contextlevels($roleid, [CONTEXT_SYSTEM, CONTEXT_COURSECAT]);
+            } catch (\Throwable $e) {
+                debugging('local_gradesheet: could not create role ' . $shortname . ': ' . $e->getMessage(), DEBUG_DEVELOPER);
+            }
+        }
+    }
+
+    /** Display form of a signatory name: full name in CAPS. */
+    private static function signatory_name(\stdClass $user): string {
+        return strtoupper(trim(fullname($user)));
+    }
+
+    /**
+     * Auto-detects the four signatories from Moodle role assignments.
+     *
+     * Instructor: a user with local/gradesheet:manage enrolled in the course
+     * (restricted to the group when $groupid > 0). The current user wins when
+     * they are one; otherwise the only teacher; otherwise nothing is detected.
+     *
+     * Department Head / Registrar / College Dean: the first user holding the
+     * configured role, searched upward from the course context through its
+     * categories to the system context. So a dean assigned at the college
+     * category is found by every course under it.
+     *
+     * @return array<string, array{name:string, source:string}>
+     */
+    public static function detect_signatories(int $courseid, int $groupid = 0): array {
+        global $DB, $USER;
+
+        $out = [];
+        foreach (array_keys(self::signatory_roles()) as $key) {
+            $out[$key] = ['name' => '', 'source' => ''];
+        }
+        if ($courseid <= 0) {
+            return $out;
+        }
+        $ctx = \context_course::instance($courseid);
+
+        // Instructor.
+        $teachers = get_enrolled_users($ctx, 'local/gradesheet:manage', $groupid, 'u.id, u.firstname, u.lastname, u.middlename, u.firstnamephonetic, u.lastnamephonetic, u.alternatename', 'u.lastname ASC, u.firstname ASC');
+        $scope = $groupid > 0 ? 'this section' : 'this course';
+        if (!empty($USER->id) && isset($teachers[$USER->id])) {
+            $out['instructor'] = ['name' => self::signatory_name($teachers[$USER->id]), 'source' => 'you are a teacher in ' . $scope];
+        } else if (count($teachers) === 1) {
+            $out['instructor'] = ['name' => self::signatory_name(reset($teachers)), 'source' => 'only teacher in ' . $scope];
+        } else if (count($teachers) > 1) {
+            $out['instructor'] = ['name' => '', 'source' => count($teachers) . ' teachers in ' . $scope . ' — cannot pick one automatically'];
+        } else {
+            $out['instructor'] = ['name' => '', 'source' => 'no teacher enrolled in ' . $scope];
+        }
+
+        // Role-based signatories, searched upward through the context tree.
+        $contexts = method_exists($ctx, 'get_parent_contexts') ? $ctx->get_parent_contexts(true) : [$ctx];
+        foreach (['department_head', 'registrar', 'college_dean'] as $key) {
+            $shortname = self::signatory_role_shortname($key);
+            $roleid = $DB->get_field('role', 'id', ['shortname' => $shortname]);
+            if (!$roleid) {
+                $out[$key] = ['name' => '', 'source' => "role '" . $shortname . "' does not exist on this site"];
+                continue;
+            }
+            $found = null;
+            $where = '';
+            foreach ($contexts as $c) {
+                $users = get_role_users($roleid, $c, false, 'u.id, u.firstname, u.lastname, u.middlename, u.firstnamephonetic, u.lastnamephonetic, u.alternatename', 'u.lastname ASC, u.firstname ASC');
+                if (!empty($users)) {
+                    $found = reset($users);
+                    $where = method_exists($c, 'get_context_name') ? $c->get_context_name(false, true) : '';
+                    break;
+                }
+            }
+            if ($found) {
+                $out[$key] = ['name' => self::signatory_name($found), 'source' => "role '" . $shortname . "'" . ($where !== '' ? ' at ' . $where : '')];
+            } else {
+                $out[$key] = ['name' => '', 'source' => "nobody holds role '" . $shortname . "' in this course, its categories, or the site"];
+            }
+        }
+        return $out;
+    }
+
+    /**
+     * Resolves the four signatory lines for a course/section, applying one
+     * precedence everywhere (dashboard, preview, PDF, Excel):
+     *   instructor: section override > detected section teacher > typed course name > detected course teacher
+     *   others:     typed course name > detected role holder
+     *
+     * @param array $cfg Output of load_course_config().
+     * @return array<string, array{name:string, how:string, source:string}> how = override|typed|auto|''
+     */
+    public static function resolve_signatories(array $cfg, int $courseid, int $groupid = 0): array {
+        $detected = self::detect_signatories($courseid, $groupid);
+        $cfgkeys  = ['instructor' => 'instructor', 'department_head' => 'depthead', 'registrar' => 'registrar', 'college_dean' => 'collegedean'];
+        $override = $groupid > 0 ? self::get_group_overrides($courseid, $groupid) : null;
+
+        $out = [];
+        foreach ($cfgkeys as $dkey => $ckey) {
+            $typed = $cfg[$ckey] ?? '';
+            $det   = $detected[$dkey];
+            if ($dkey === 'instructor' && $override && !empty($override->instructor)) {
+                $out[$dkey] = ['name' => $override->instructor, 'how' => 'override', 'source' => 'per-section override'];
+            } else if ($dkey === 'instructor' && $groupid > 0 && $det['name'] !== '') {
+                $out[$dkey] = ['name' => $det['name'], 'how' => 'auto', 'source' => $det['source']];
+            } else if (!self::signatory_is_blank($typed)) {
+                $out[$dkey] = ['name' => $typed, 'how' => 'typed', 'source' => 'typed in Settings'];
+            } else {
+                $out[$dkey] = ['name' => $det['name'], 'how' => $det['name'] !== '' ? 'auto' : '', 'source' => $det['source']];
+            }
+        }
+        return $out;
+    }
+
+    /** True when a stored signatory value should be treated as "not set". */
+    public static function signatory_is_blank($value): bool {
+        $v = strtoupper(trim((string)$value));
+        return $v === '' || in_array($v, self::SIGNATORY_PLACEHOLDERS, true);
     }
 
     public static function load_course_config(int $courseid): array {

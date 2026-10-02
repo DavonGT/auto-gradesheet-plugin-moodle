@@ -306,6 +306,22 @@ if ($courseid) {
         echo helper::render_alert(implode(' &middot; ', $rulesparts), 'secondary', '&#8505;',
             $canmanage ? '<a href="course_settings.php?courseid=' . $courseid . '#computation-rules" class="btn btn-light btn-sm">Change</a>' : '');
 
+        // Signatory lines as they will print: typed name, section override, or auto-detected from roles.
+        $signatories = helper::resolve_signatories($cfg, $courseid, $groupid);
+        $sigparts = [];
+        $sigmissing = false;
+        foreach (['instructor' => 'Instructor', 'department_head' => 'Dept. Head', 'registrar' => 'Registrar', 'college_dean' => 'Dean'] as $k => $lbl) {
+            $sg = $signatories[$k];
+            if ($sg['name'] === '') {
+                $sigmissing = true;
+                $sigparts[] = $lbl . ': <span class="text-danger">not set</span> <small class="text-muted">(' . s($sg['source']) . ')</small>';
+            } else {
+                $sigparts[] = $lbl . ': <strong>' . s($sg['name']) . '</strong> <small class="text-muted" title="' . s($sg['source']) . '">(' . $sg['how'] . ')</small>';
+            }
+        }
+        echo helper::render_alert('Signatories &mdash; ' . implode(' &middot; ', $sigparts), $sigmissing ? 'warning' : 'secondary', $sigmissing ? '&#9888;' : '&#9998;',
+            $canmanage ? '<a href="course_settings.php?courseid=' . $courseid . '" class="btn btn-light btn-sm">Edit</a>' : '');
+
         if ($canmanage) {
             $groupparam = ($groupid > 0) ? '&group=' . $groupid : '';
             $btncls = $weightvalid['valid'] ? '' : ' disabled';

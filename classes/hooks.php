@@ -137,21 +137,34 @@ class hooks {
 
         // 8. Instructor Name (Defaults to currently logged-in user)
         $default_instructor = '';
-        if ($existing && !empty($existing->instructor)) {
+        $detected = $courseid > 0 ? \local_gradesheet\helper::detect_signatories($courseid) : null;
+        $detect_hint = function (string $key) use ($detected): string {
+            if (!$detected) {
+                return 'Leave blank to auto-detect from Moodle roles once the course exists.';
+            }
+            $d = $detected[$key];
+            return $d['name'] !== ''
+                ? 'Leave blank to use the auto-detected name: ' . s($d['name']) . ' (' . s($d['source']) . ').'
+                : 'Nothing auto-detected yet: ' . s($d['source']) . '. Leave blank, or type a name.';
+        };
+
+        if ($existing && !\local_gradesheet\helper::signatory_is_blank($existing->instructor)) {
             $default_instructor = $existing->instructor;
-        } else if (!empty($USER->id)) {
-            $default_instructor = strtoupper(trim(fullname($USER)));
         }
         $mform->addElement('text', 'gradesheet_instructor', 'Instructor Name', ['size' => 50]);
         $mform->setType('gradesheet_instructor', PARAM_TEXT);
         $mform->setDefault('gradesheet_instructor', $default_instructor);
+        $mform->addElement('static', 'gradesheet_instructor_hint', '', '<small class="text-muted">' . $detect_hint('instructor') . '</small>');
 
         // Helper to build signatory element (dropdown of past entries + text entry hidden unless '__new__' is chosen)
-        $add_signatory_element = function(string $fieldname, string $label, ?string $existingval) use ($mform) {
+        $add_signatory_element = function(string $fieldname, string $label, ?string $existingval) use ($mform, $detect_hint) {
+            if (\local_gradesheet\helper::signatory_is_blank($existingval)) {
+                $existingval = null;
+            }
             $past_options = self::get_distinct_options($fieldname);
             
             // Build options array with existing names
-            $select_options = ['' => '-- Select ' . $label . ' --'];
+            $select_options = ['' => '-- Auto-detect ' . $label . ' --'];
             foreach ($past_options as $name) {
                 $select_options[$name] = $name;
             }
@@ -176,6 +189,7 @@ class hooks {
 
             // Hide the text field unless '__new__' option is selected!
             $mform->hideIf($new_name, $select_name, 'neq', '__new__');
+            $mform->addElement('static', $select_name . '_hint', '', '<small class="text-muted">' . $detect_hint($fieldname) . '</small>');
         };
 
         // 9. Department Head
