@@ -14,7 +14,7 @@ A Moodle local plugin that generates "Report of Grades" documents for Eastern Sa
 - Excel export via PhpSpreadsheet
 - Course-level configuration (semester, school year, signatories, grade categories)
 - Auto-initialization of defaults on course creation
-- Course edit form integration via Moodle 4.5+ hooks
+- Course edit form integration via the core course-form hooks (Moodle 4.4+; on 4.3 use the plugin's Settings page)
 
 ## Repository Structure
 
@@ -55,8 +55,8 @@ Page files (`index.php`, `export.php`, `export_excel.php`, `preview.php`) are th
 
 ## Requirements
 
-- Moodle 4.5+ (`2024100700`)
-- PHP version supported by Moodle
+- Moodle 4.3 or later (`2023100900`); tested on 4.3, 4.4 and 4.5 (Bootstrap 4 themes)
+- PHP 8.0+ (whatever the Moodle release requires)
 - PhpSpreadsheet (bundled with Moodle)
 - TCPDF (bundled with Moodle)
 
@@ -81,7 +81,8 @@ Page files (`index.php`, `export.php`, `export_excel.php`, `preview.php`) are th
 
 ## Configuration
 
-- Course-level settings: `course_settings.php` or the Moodle course edit form (Moodle 4.5+ hooks).
+- Course-level settings: `course_settings.php` (all versions) or the Moodle course edit form (Moodle 4.4+ only; `\core_course\hook\after_form_definition` does not exist in 4.3, so on 4.3 the "Gradesheet Configuration" section simply does not appear in the course form — nothing else is affected).
+- Signatory roles (`departmenthead`, `collegedean`, `registrar`) are created on install/upgrade; assign them at the category or system level for auto-detection.
 - Default categories and config are auto-created on course creation.
 - Language strings can be adjusted via `lang/en/local_gradesheet.php`.
 

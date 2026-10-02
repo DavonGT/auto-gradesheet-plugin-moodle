@@ -555,6 +555,9 @@ echo '<div class="local-gradesheet-page">';
                 <input type="hidden" name="action" value="savedetails">
                 <input type="hidden" name="sesskey" value="<?php echo sesskey(); ?>">
 
+                <?php if (!class_exists('\\core_course\\hook\\after_form_definition')): ?>
+                    <p class="text-muted small">This Moodle version (older than 4.4) has no course-form hook, so these fields are edited here only.</p>
+                <?php endif; ?>
                 <h6 class="text-muted mb-3">- Report Header -</h6>
                 <div class="form-group row mb-3">
                     <label class="col-sm-4 col-form-label"><strong>Semester</strong></label>

@@ -30,3 +30,17 @@ $string['role_collegedean']        = 'College Dean role';
 $string['role_collegedean_desc']   = 'Shortname of the role whose holder signs as College Dean.';
 $string['role_registrar']          = 'Registrar role';
 $string['role_registrar_desc']     = 'Shortname of the role whose holder signs as Registrar.';
+
+// Privacy API.
+$string['privacy:metadata:status']              = 'Faculty-set academic status overrides (Incomplete, Dropped, Withdrawn, In Progress) per student per course.';
+$string['privacy:metadata:status:courseid']     = 'The course the status applies to.';
+$string['privacy:metadata:status:userid']       = 'The student the status applies to.';
+$string['privacy:metadata:status:status']       = 'The status code set by the faculty member.';
+$string['privacy:metadata:status:timemodified'] = 'When the status was last changed.';
+$string['privacy:metadata:config']              = 'Per-course report header settings, including signatory names typed by faculty. These names are free text and are not linked to Moodle user accounts.';
+$string['privacy:metadata:config:instructor']      = 'Instructor name typed for the report (if not auto-detected).';
+$string['privacy:metadata:config:department_head'] = 'Department Head name typed for the report (if not auto-detected).';
+$string['privacy:metadata:config:registrar']       = 'Registrar name typed for the report (if not auto-detected).';
+$string['privacy:metadata:config:college_dean']    = 'College Dean name typed for the report (if not auto-detected).';
+$string['privacy:metadata:groupcfg']            = 'Per-section report header overrides.';
+$string['privacy:metadata:groupcfg:instructor'] = 'Instructor name typed for a section (if not auto-detected).';
