@@ -65,4 +65,17 @@ class observer {
             $DB->delete_records('local_gradesheet_status', ['userid' => $userid]);
         }
     }
+
+    /**
+     * Triggered when a new grade item is created in Moodle.
+     * Automatically classifies and maps the item to the course's gradesheet category and period.
+     *
+     * @param \core\event\grade_item_created $event
+     */
+    public static function grade_item_created(\core\event\grade_item_created $event) {
+        $gi = $event->get_record_snapshot('grade_items', $event->objectid);
+        if ($gi && !empty($gi->courseid)) {
+            \local_gradesheet\helper::auto_map_grade_item((int)$gi->courseid, $gi);
+        }
+    }
 }

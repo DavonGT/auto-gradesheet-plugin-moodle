@@ -18,4 +18,8 @@ $observers = [
         'eventname' => '\core\event\user_deleted',
         'callback'  => '\local_gradesheet\observer::user_deleted',
     ],
+    [
+        'eventname' => '\core\event\grade_item_created',
+        'callback'  => '\local_gradesheet\observer::grade_item_created',
+    ],
 ];
