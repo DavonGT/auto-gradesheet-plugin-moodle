@@ -63,6 +63,26 @@ class AutomapMockDB {
         }
         return [];
     }
+
+    public function count_records(string $table, ?array $conditions = null): int {
+        if ($table === 'local_gradesheet_itemmap') {
+            $count = 0;
+            foreach ($this->itemmap as $m) {
+                $match = true;
+                if ($conditions) {
+                    foreach ($conditions as $k => $v) {
+                        if (($m->$k ?? null) != $v) { $match = false; break; }
+                    }
+                }
+                if ($match) { $count++; }
+            }
+            return $count;
+        }
+        if ($table === 'local_gradesheet_categories') {
+            return count($this->categories);
+        }
+        return 0;
+    }
 }
 
 global $DB;
@@ -104,7 +124,7 @@ $res = helper::auto_map_grade_item(101, $item_quiz);
 $assert("Chapter 1 Quiz auto-maps successfully", $res === true);
 $m = $DB->itemmap[10] ?? null;
 $assert("Chapter 1 Quiz maps to Quizzes category (id=1)", $m && $m->categoryid === 1);
-$assert("Chapter 1 Quiz default period is finals", $m && $m->period === 'finals');
+$assert("Chapter 1 Quiz initial period defaults to midterm", $m && $m->period === 'midterm');
 
 // Test 2: Midterm Quiz Module Item
 $item_midquiz = (object)[

@@ -73,9 +73,67 @@ class observer {
      * @param \core\event\grade_item_created $event
      */
     public static function grade_item_created(\core\event\grade_item_created $event) {
-        $gi = $event->get_record_snapshot('grade_items', $event->objectid);
+        $gi = null;
+        if (method_exists($event, 'get_grade_item')) {
+            try {
+                $gi = $event->get_grade_item();
+            } catch (\Throwable $t) {
+                $gi = null;
+            }
+        }
+        if (!$gi) {
+            $gi = $event->get_record_snapshot('grade_items', $event->objectid);
+        }
         if ($gi && !empty($gi->courseid)) {
             \local_gradesheet\helper::auto_map_grade_item((int)$gi->courseid, $gi);
+        }
+    }
+
+    /**
+     * Triggered when a grade item is updated in Moodle (renamed, maxgrade changed, etc.).
+     * Auto-maps if the item was unmapped or mapped to an invalid category.
+     *
+     * @param \core\event\grade_item_updated $event
+     */
+    public static function grade_item_updated(\core\event\grade_item_updated $event) {
+        $gi = null;
+        if (method_exists($event, 'get_grade_item')) {
+            try {
+                $gi = $event->get_grade_item();
+            } catch (\Throwable $t) {
+                $gi = null;
+            }
+        }
+        if (!$gi) {
+            $gi = $event->get_record_snapshot('grade_items', $event->objectid);
+        }
+        if ($gi && !empty($gi->courseid)) {
+            \local_gradesheet\helper::auto_map_grade_item((int)$gi->courseid, $gi, false);
+        }
+    }
+
+    /**
+     * Triggered when a course module (quiz, assign, etc.) is created in Moodle.
+     * Ensures all grade items for the course are automatically mapped.
+     *
+     * @param \core\event\course_module_created $event
+     */
+    public static function course_module_created(\core\event\course_module_created $event) {
+        $courseid = $event->courseid ?? 0;
+        if ($courseid > 0) {
+            \local_gradesheet\helper::auto_map_unmapped_items((int)$courseid);
+        }
+    }
+
+    /**
+     * Triggered when a course module is updated in Moodle.
+     *
+     * @param \core\event\course_module_updated $event
+     */
+    public static function course_module_updated(\core\event\course_module_updated $event) {
+        $courseid = $event->courseid ?? 0;
+        if ($courseid > 0) {
+            \local_gradesheet\helper::auto_map_unmapped_items((int)$courseid);
         }
     }
 }

@@ -15,6 +15,9 @@ $PAGE->set_context($context);
 $PAGE->set_title('Grade Sheet Settings');
 $PAGE->set_heading('Grade Sheet Settings');
 
+helper::ensure_course_defaults($courseid);
+helper::auto_map_unmapped_items($courseid);
+
 $coursename = $DB->get_field('course', 'fullname', ['id' => $courseid]);
 
 $gitems = $DB->get_records_select(
@@ -291,6 +294,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $DB->insert_record('local_gradesheet_categories', (object)[
                     'courseid' => $courseid, 'name' => $name, 'weight' => round($weight, 2), 'sortorder' => $sortorder,
                 ]);
+                helper::auto_map_unmapped_items($courseid);
                 helper::reset_caches();
                 $ok($catsurl, "Category '" . s($name) . "' added.", $weight_note());
                 break;
@@ -839,7 +843,7 @@ echo '<div class="local-gradesheet-page">';
                         </tbody>
                     </table>
                     <button type="submit" class="btn btn-primary">Save Mapping</button>
-                    <span class="text-muted small ml-2 ms-2">New activities you add to the course later show up here unmapped; come back and map them.</span>
+                    <span class="text-muted small ml-2 ms-2">Activities and quizzes you create in your course are automatically classified and mapped. You can review or adjust their mappings above at any time.</span>
                 </form>
             <?php endif; ?>
             <div class="gs-step-next text-right">
